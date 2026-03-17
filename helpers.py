@@ -939,9 +939,17 @@ def compute_cluster_centroids(values, labels):
 
 def plot_kmeans_pca_scatter(X_pca, labels, title='K-means in PCA Space',
                             ax=None, markersize=40):
-    """Plot PC1 vs PC2 with cluster centroids."""
+    """Plot PC1 vs PC2 with cluster centroids.
+
+    Returns
+    -------
+    fig, ax : tuple
+        Matplotlib figure and axes containing the scatter plot.
+    """
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 6))
+    else:
+        fig = ax.figure
 
     n_clusters = len(np.unique(labels))
     colors = CATEGORICAL_COLORS[:n_clusters]
@@ -961,7 +969,7 @@ def plot_kmeans_pca_scatter(X_pca, labels, title='K-means in PCA Space',
     ax.set_title(title)
     ax.legend()
 
-    return ax
+    return fig, ax
 
 
 def plot_elbow_silhouette(k_range, inertias, silhouettes, figsize=(14, 5),
@@ -3023,3 +3031,119 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     print(f"Positive samples (within {radius_m}m of deposit): {n_pos} | Background: {n_neg}")
 
     return y_labels
+
+
+def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
+    """
+    Split point data into train/test using a checkerboard over projected space.
+
+    Parameters
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Point geometries to split.
+    y : array-like, optional
+        Binary labels aligned with ``gdf``. When provided, the function chooses
+        the checkerboard offset/parity that preserves at least one positive in
+        both train and test when possible.
+    cell_size_m : float
+        Checkerboard cell size in metres.
+    random_state : int
+        Reserved for API stability. Not currently used.
+
+    Returns
+    -------
+    split : dict
+        Train/test masks plus checkerboard metadata.
+    """
+    import geopandas as gpd
+
+    if gdf.crs is None:
+        raise ValueError("GeoDataFrame must have a CRS before applying a spatial split.")
+    if cell_size_m <= 0:
+        raise ValueError("cell_size_m must be positive.")
+
+    metric_crs = gdf.crs
+    if gdf.crs.is_geographic:
+        metric_crs = gdf.estimate_utm_crs()
+        if metric_crs is None:
+            raise ValueError("Could not estimate a projected CRS for checkerboard split.")
+
+    metric_gdf = gdf.to_crs(metric_crs)
+    xs = metric_gdf.geometry.x.to_numpy()
+    ys = metric_gdf.geometry.y.to_numpy()
+    x_min = xs.min()
+    y_min = ys.min()
+
+    if y is not None:
+        y = np.asarray(y)
+        if len(y) != len(gdf):
+            raise ValueError("y must have the same length as gdf.")
+
+    candidates = []
+    half = cell_size_m / 2.0
+    offsets = [(0.0, 0.0), (half, 0.0), (0.0, half), (half, half)]
+
+    for x_offset_m, y_offset_m in offsets:
+        x_idx = np.floor((xs - x_min + x_offset_m) / cell_size_m).astype(int)
+        y_idx = np.floor((ys - y_min + y_offset_m) / cell_size_m).astype(int)
+        checker_id = x_idx + y_idx
+        checkerboard = checker_id % 2
+
+        for test_parity in (0, 1):
+            test_mask = checkerboard == test_parity
+            train_mask = ~test_mask
+            if not train_mask.any() or not test_mask.any():
+                continue
+
+            candidate = {
+                "train_mask": train_mask,
+                "test_mask": test_mask,
+                "checkerboard": checkerboard,
+                "x_index": x_idx,
+                "y_index": y_idx,
+                "metric_crs": metric_crs,
+                "cell_size_m": float(cell_size_m),
+                "x_offset_m": float(x_offset_m),
+                "y_offset_m": float(y_offset_m),
+                "test_parity": int(test_parity),
+                "train_size": int(train_mask.sum()),
+                "test_size": int(test_mask.sum()),
+            }
+
+            if y is not None:
+                train_pos = int(y[train_mask].sum())
+                test_pos = int(y[test_mask].sum())
+                train_neg = int(train_mask.sum() - train_pos)
+                test_neg = int(test_mask.sum() - test_pos)
+                candidate.update(
+                    {
+                        "train_pos": train_pos,
+                        "test_pos": test_pos,
+                        "train_neg": train_neg,
+                        "test_neg": test_neg,
+                        "valid_class_split": (
+                            train_pos > 0 and test_pos > 0 and train_neg > 0 and test_neg > 0
+                        ),
+                    }
+                )
+
+            candidates.append(candidate)
+
+    if not candidates:
+        raise ValueError("Could not construct a checkerboard split from the provided points.")
+
+    if y is None:
+        best = min(candidates, key=lambda c: abs(c["test_size"] - c["train_size"]))
+    else:
+        valid = [c for c in candidates if c["valid_class_split"]]
+        pool = valid if valid else candidates
+        best = min(
+            pool,
+            key=lambda c: (
+                0 if c.get("test_pos", 0) > 0 else 1,
+                c.get("test_pos", 0) if c.get("test_pos", 0) > 0 else np.inf,
+                abs(c["test_size"] - c["train_size"]),
+            ),
+        )
+
+    return best
