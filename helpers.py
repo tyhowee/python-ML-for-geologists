@@ -3033,6 +3033,60 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     return y_labels
 
 
+def extract_raster_values(geochem_gdf, *raster_dirs):
+    """
+    Sample raster layers at geochem sample locations.
+
+    Parameters
+    ----------
+    geochem_gdf : geopandas.GeoDataFrame
+        Point locations to sample at.
+    *raster_dirs : Path or str
+        One or more directories containing .tif files.  Each directory's stem
+        is used as a prefix for the layer names (e.g. a dir named ``spectral``
+        produces names like ``spectral_idx_clay_hydroxyls``).
+
+    Returns
+    -------
+    X_raw : np.ndarray, shape (n_samples, n_rasters)
+        Sampled values; NaN where a point falls outside a raster's extent or
+        on a nodata cell.
+    predictor_names : list[str]
+        One name per column of ``X_raw``.
+    """
+    import rasterio
+    from pyproj import Transformer
+    from pathlib import Path
+
+    layers = {}
+    for raster_dir in raster_dirs:
+        raster_dir = Path(raster_dir)
+        prefix = raster_dir.stem
+        tif_paths = sorted(raster_dir.glob("*.tif"))
+        if not tif_paths:
+            raise FileNotFoundError(f"No .tif files found in {raster_dir}")
+        for path in tif_paths:
+            with rasterio.open(path) as src:
+                if src.crs and geochem_gdf.crs and src.crs != geochem_gdf.crs:
+                    t = Transformer.from_crs(geochem_gdf.crs, src.crs, always_xy=True)
+                    xs, ys = t.transform(
+                        geochem_gdf.geometry.x.values, geochem_gdf.geometry.y.values
+                    )
+                else:
+                    xs = geochem_gdf.geometry.x.values
+                    ys = geochem_gdf.geometry.y.values
+                coords = list(zip(xs, ys))
+                vals = np.array([v[0] for v in src.sample(coords)], dtype=float)
+                if src.nodata is not None:
+                    vals[vals == src.nodata] = np.nan
+            layers[f"{prefix}_{path.stem}"] = vals
+
+    predictor_names = list(layers.keys())
+    X_raw = np.column_stack(list(layers.values()))
+    print(f"Raster layers extracted: {len(predictor_names)}")
+    return X_raw, predictor_names
+
+
 def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
     """
     Split point data into train/test using a checkerboard over projected space.
