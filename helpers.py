@@ -3033,6 +3033,43 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     return y_labels
 
 
+def add_lithology_features(geochem_gdf, lith_gdf, col="lithology_family"):
+    """
+    Assign a lithology class to each geochem sample via spatial join and
+    return one-hot encoded columns aligned to geochem_gdf.
+
+    Parameters
+    ----------
+    geochem_gdf : GeoDataFrame — sample point locations
+    lith_gdf    : GeoDataFrame — lithology polygons
+    col         : str          — column in lith_gdf to encode (default: "lithology_family")
+
+    Returns
+    -------
+    dummies : pd.DataFrame, shape (n_samples, n_classes)
+        One-hot encoded lithology columns; rows with no polygon match are all zeros.
+    """
+    import geopandas as gpd
+
+    if lith_gdf.crs != geochem_gdf.crs:
+        lith_gdf = lith_gdf.to_crs(geochem_gdf.crs)
+
+    joined = gpd.sjoin(
+        geochem_gdf[["geometry"]],
+        lith_gdf[[col, "geometry"]],
+        how="left",
+        predicate="within",
+    )
+    # Keep first match per point (index_right may duplicate on overlapping polygons)
+    joined = joined[~joined.index.duplicated(keep="first")]
+
+    dummies = pd.get_dummies(joined[col], prefix="lith", dtype=float).reindex(
+        geochem_gdf.index, fill_value=0.0
+    )
+    print(f"Lithology feature columns ({len(dummies.columns)}): {list(dummies.columns)}")
+    return dummies
+
+
 def extract_raster_values(geochem_gdf, *raster_dirs):
     """
     Sample raster layers at geochem sample locations.
