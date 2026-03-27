@@ -3238,3 +3238,226 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
         )
 
     return best
+
+
+# =============================================================================
+# Visualization helpers (wrapping boilerplate for notebook clarity)
+# =============================================================================
+
+def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8)):
+    """Map of geochem sample locations, lithology background, and known deposits."""
+    fig, ax = plt.subplots(figsize=figsize)
+    plot_vector(lith_gdf, ax=ax, title="Sample Locations and Known Deposits",
+                alpha=0.3, edgecolor="grey", linewidth=0.4)
+    geochem_gdf.plot(ax=ax, color="steelblue", markersize=15, alpha=0.7,
+                     label="Geochem samples")
+    tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=180,
+                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+    ax.legend()
+    plt.tight_layout()
+    return fig, ax
+
+
+def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
+                           y, radius_m, tgt_gdf, geochem_X, feature_cols,
+                           preview_elements=("Cu_ppm_icp", "Mo_ppm_icp", "Au_ppb_icp")):
+    """
+    Two figures:
+      1. Grid of all raster inputs + lithology panel + training labels panel.
+      2. Three geochem pathfinder scatter plots.
+    """
+    import rasterio
+    from pathlib import Path
+
+    spectral_dir = Path(spectral_dir)
+    geophys_dir  = Path(geophys_dir)
+    all_raster_paths = sorted(spectral_dir.glob("*.tif")) + sorted(geophys_dir.glob("*.tif"))
+
+    # ── Figure 1: rasters + lith + labels ─────────────────────────────────
+    ncols = 5
+    nrows = -(-len(all_raster_paths) // ncols) + 1
+    fig1, axes = plt.subplots(nrows, ncols, figsize=(18, nrows * 3.2))
+    axes_flat = axes.flatten()
+
+    for i, path in enumerate(all_raster_paths):
+        ax = axes_flat[i]
+        with rasterio.open(path) as src:
+            data = src.read(1).astype(np.float64)
+            if src.nodata is not None:
+                data[data == src.nodata] = np.nan
+            b = src.bounds
+            extent = (b.left, b.right, b.bottom, b.top)
+        cmap = "RdBu_r" if path.parent == geophys_dir else "YlOrBr"
+        vmin, vmax = np.nanpercentile(data, [2, 98])
+        ax.imshow(data, extent=extent, origin="upper", aspect="auto",
+                  cmap=cmap, vmin=vmin, vmax=vmax)
+        label = ("mag " if path.parent == geophys_dir else "spec ") + \
+                path.stem.replace("idx_", "").replace("_", " ").replace("AMF", "")
+        ax.set_title(label.strip(), fontsize=7, pad=2)
+        ax.set_xticks([]); ax.set_yticks([])
+
+    lith_ax = axes_flat[len(all_raster_paths)]
+    lith_gdf.plot(column="lithology_family", ax=lith_ax, cmap="tab10",
+                  alpha=0.85, legend=False)
+    lith_ax.set_title("lithology family", fontsize=7, pad=2)
+    lith_ax.set_xticks([]); lith_ax.set_yticks([])
+
+    label_ax = axes_flat[len(all_raster_paths) + 1]
+    plot_vector(lith_gdf, ax=label_ax, alpha=0.15, edgecolor="grey", linewidth=0.3)
+    geochem_gdf[y == 0].plot(ax=label_ax, color="steelblue", markersize=4, alpha=0.5)
+    geochem_gdf[y == 1].plot(ax=label_ax, color="red", markersize=10, alpha=0.85)
+    tgt_gdf.plot(ax=label_ax, marker="*", color="gold", markersize=60,
+                 edgecolor="black", linewidth=0.5, zorder=5)
+    label_ax.set_title(f"training labels (±{radius_m // 1000} km)", fontsize=7, pad=2)
+    label_ax.set_xticks([]); label_ax.set_yticks([])
+
+    for j in range(len(all_raster_paths) + 2, len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    plt.suptitle(
+        f"Input Features — {len(all_raster_paths)} rasters + lithology + "
+        f"{len(feature_cols)} geochem elements (log-transformed)",
+        fontsize=11, y=1.01,
+    )
+    plt.tight_layout()
+
+    # ── Figure 2: geochem pathfinder scatter ───────────────────────────────
+    feature_cols = list(feature_cols)
+    valid_elems = [e for e in preview_elements if e in feature_cols]
+    fig2, axes2 = plt.subplots(1, len(valid_elems), figsize=(5 * len(valid_elems), 4))
+    if len(valid_elems) == 1:
+        axes2 = [axes2]
+
+    xs = geochem_gdf.geometry.x.values
+    ys = geochem_gdf.geometry.y.values
+    for ax, col in zip(axes2, valid_elems):
+        idx = feature_cols.index(col)
+        sc = ax.scatter(xs, ys, c=geochem_X[:, idx], cmap="plasma", s=12, linewidths=0)
+        plt.colorbar(sc, ax=ax, shrink=0.7, label="log(value + 1)")
+        parts = col.split("_")
+        ax.set_title(f"{parts[0]} ({parts[1]})", fontsize=10)
+        ax.set_xticks([]); ax.set_yticks([])
+
+    plt.suptitle(f"Geochem Pathfinders (log-transformed) — {len(valid_elems)} of {len(feature_cols)} input features",
+                 fontsize=11, y=1.02)
+    plt.tight_layout()
+
+    return fig1, fig2
+
+
+def get_feature_importance(rf, feature_names):
+    """Return a DataFrame of feature importances sorted descending."""
+    return pd.DataFrame({
+        "feature": feature_names,
+        "importance": rf.feature_importances_,
+    }).sort_values("importance", ascending=False).reset_index(drop=True)
+
+
+def plot_probability_map(gdf_valid, y_valid, y_prob_all, lith_gdf, tgt_gdf,
+                          radius_m, figsize=(16, 7)):
+    """Side-by-side map: training labels (left) and predicted probability (right)."""
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    ax = axes[0]
+    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="grey", linewidth=0.4)
+    gdf_valid[y_valid == 0].plot(ax=ax, color="steelblue", markersize=10,
+                                  alpha=0.5, label="Background")
+    gdf_valid[y_valid == 1].plot(ax=ax, color="red", markersize=20, alpha=0.8,
+                                  label=f"Positive (within {radius_m // 1000} km)")
+    tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=150,
+                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+    ax.set_title("Training Labels")
+    ax.legend(fontsize=8)
+
+    ax = axes[1]
+    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="grey", linewidth=0.4)
+    sc = ax.scatter(gdf_valid.geometry.x, gdf_valid.geometry.y,
+                    c=y_prob_all, cmap="plasma", vmin=0, vmax=1,
+                    s=30, alpha=0.85, zorder=3)
+    tgt_gdf.plot(ax=ax, marker="*", color="white", markersize=150,
+                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+    plt.colorbar(sc, ax=ax, label="Predicted probability", shrink=0.7)
+    ax.set_title("Predicted Probability (all samples)")
+    ax.legend(fontsize=8)
+
+    plt.tight_layout()
+    return fig, axes
+
+
+def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)):
+    """
+    Map showing which samples landed in the train vs test set after a spatial
+    checkerboard split, with faint grid lines showing the cell boundaries.
+    """
+    from pyproj import Transformer
+
+    train_mask  = split["train_mask"]
+    test_mask   = split["test_mask"]
+    cell_size   = split["cell_size_m"]
+    cell_km     = cell_size / 1000
+    metric_crs  = split["metric_crs"]
+    x_off       = split["x_offset_m"]
+    y_off       = split["y_offset_m"]
+    display_crs = gdf_valid.crs
+
+    fig, ax = plt.subplots(figsize=figsize)
+    plot_vector(lith_gdf, ax=ax, alpha=0.15, edgecolor="grey", linewidth=0.3)
+
+    # ── Checkerboard grid lines ────────────────────────────────────────────
+    # The split anchors the grid at (xs.min() - x_offset, ys.min() - y_offset)
+    # in projected coords, so we must recompute the same origin here.
+    metric_gdf = gdf_valid.to_crs(metric_crs)
+    xs_m = metric_gdf.geometry.x.values
+    ys_m = metric_gdf.geometry.y.values
+
+    x_origin = xs_m.min() - x_off
+    y_origin = ys_m.min() - y_off
+
+    # Grid line positions covering the data extent plus one cell of padding
+    def grid_lines(origin, values, size):
+        k0 = int(np.floor((values.min() - origin) / size)) - 1
+        k1 = int(np.ceil( (values.max() - origin) / size)) + 1
+        return [origin + k * size for k in range(k0, k1 + 1)]
+
+    x_lines = grid_lines(x_origin, xs_m, cell_size)
+    y_lines = grid_lines(y_origin, ys_m, cell_size)
+
+    t = Transformer.from_crs(metric_crs, display_crs, always_xy=True)
+    y_lo, y_hi = y_lines[0], y_lines[-1]
+    x_lo, x_hi = x_lines[0], x_lines[-1]
+
+    # Add intermediate points so lines stay accurate after reprojection
+    n_seg = 10
+    for x in x_lines:
+        ys_line = np.linspace(y_lo, y_hi, n_seg)
+        lons, lats = t.transform(np.full(n_seg, x), ys_line)
+        ax.plot(lons, lats, color="dimgrey", linewidth=0.4, alpha=0.35, zorder=2)
+
+    for y in y_lines:
+        xs_line = np.linspace(x_lo, x_hi, n_seg)
+        lons, lats = t.transform(xs_line, np.full(n_seg, y))
+        ax.plot(lons, lats, color="dimgrey", linewidth=0.4, alpha=0.35, zorder=2)
+
+    # ── Sample points ──────────────────────────────────────────────────────
+    gdf_valid[train_mask].plot(ax=ax, color="steelblue", markersize=12,
+                                alpha=0.7, label=f"Train  (n={train_mask.sum()})", zorder=3)
+    gdf_valid[test_mask].plot(ax=ax,  color="darkorange", markersize=12,
+                               alpha=0.7, label=f"Test   (n={test_mask.sum()})",  zorder=3)
+
+    if tgt_gdf is not None:
+        tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=150,
+                     edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+
+    # Clamp view to the actual data extent (grid lines extend beyond it)
+    gx = gdf_valid.geometry.x
+    gy = gdf_valid.geometry.y
+    margin_x = (gx.max() - gx.min()) * 0.02
+    margin_y = (gy.max() - gy.min()) * 0.02
+    ax.set_xlim(gx.min() - margin_x, gx.max() + margin_x)
+    ax.set_ylim(gy.min() - margin_y, gy.max() + margin_y)
+
+    ax.set_title(f"Spatial Checkerboard Split — {cell_km:.0f} km cells\n"
+                 f"(adjacent cells alternate train/test to reduce spatial leakage)")
+    ax.legend(fontsize=9)
+    plt.tight_layout()
+    return fig, ax
