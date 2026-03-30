@@ -2168,15 +2168,26 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
     fig, ax = plt.subplots(figsize=figsize)
     cluster_colors = ['#D55E00', '#0072B2', '#009E73', '#CC79A7',
                       '#E69F00', '#56B4E9', '#F0E442', '#999999']
-    lith_colors = ['#e7eef5', '#efe6dc', '#e7ece3', '#f1e7f2',
-                   '#f5efdb', '#e5eef0', '#f0e4e4', '#ece8f4']
+    lith_colors = ['#d9e7f5', '#eadccf', '#dbe8d2', '#e6d9eb',
+                   '#f0e3bf', '#d9e7ea', '#ecd6d6', '#dfdcf0']
 
     if lith_column is None:
         lith_column = choose_lithology_column(vector_gdf)
 
+    lith_handles = []
     if lith_column:
-        n_lith = vector_gdf[lith_column].nunique(dropna=True)
-        lith_cmap = mcolors.ListedColormap(lith_colors[:n_lith])
+        lith_series = vector_gdf[lith_column].dropna().astype(str)
+        lith_units = pd.Index(sorted(lith_series.unique()))
+        n_lith = len(lith_units)
+        if n_lith > len(lith_colors):
+            base = plt.cm.tab20(np.linspace(0, 1, n_lith))[:, :3]
+            softened = 0.55 * base + 0.45
+            lith_cmap = mcolors.ListedColormap(softened)
+            lith_color_values = [tuple(color) for color in softened]
+        else:
+            lith_color_values = lith_colors[:n_lith]
+            lith_cmap = mcolors.ListedColormap(lith_color_values)
+
         plot_vector(
             vector_gdf,
             column=lith_column,
@@ -2184,11 +2195,15 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
             categorical_cmap=lith_cmap,
             ax=ax,
             title='Clusters on Lithology',
-            alpha=0.35,
-            edgecolor='#b5b5b5',
-            linewidth=0.25,
+            alpha=0.60,
+            edgecolor='#8a8a8a',
+            linewidth=0.35,
             legend=False,
         )
+        lith_handles = [
+            Patch(facecolor=color, edgecolor='#8a8a8a', linewidth=0.5, label=unit)
+            for unit, color in zip(lith_units, lith_color_values)
+        ]
     else:
         vector_gdf.plot(ax=ax, facecolor='#ececec', edgecolor='#9aa0a6',
                         linewidth=0.35, alpha=0.45)
@@ -2196,22 +2211,71 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
 
     gdf_clustered = geochem_gdf.copy()
     gdf_clustered['cluster'] = cluster_labels
-    n_clusters = len(np.unique(cluster_labels))
-    cluster_cmap = mcolors.ListedColormap(cluster_colors[:n_clusters])
+    unique_clusters = sorted(pd.unique(cluster_labels))
+    n_clusters = len(unique_clusters)
+    cluster_color_values = cluster_colors[:n_clusters]
+    cluster_cmap = mcolors.ListedColormap(cluster_color_values)
     gdf_clustered.plot(
         column='cluster',
         ax=ax,
-        legend=True,
+        legend=False,
         categorical=True,
         cmap=cluster_cmap,
-        markersize=28,
+        markersize=22,
         edgecolor='black',
         linewidth=0.35,
         alpha=0.95,
     )
 
-    ax.set_facecolor('#f7f7f7')
-    plt.tight_layout()
+    cluster_handles = [
+        plt.Line2D([0], [0], marker='o', linestyle='None',
+                   markerfacecolor=color, markeredgecolor='black',
+                   markeredgewidth=0.5, markersize=7, label=f'Cluster {cluster}')
+        for cluster, color in zip(unique_clusters, cluster_color_values)
+    ]
+    cluster_legend = ax.legend(
+        handles=cluster_handles,
+        title='Cluster Legend',
+        loc='lower left',
+        frameon=True,
+        framealpha=0.95,
+        facecolor='white',
+    )
+    ax.add_artist(cluster_legend)
+
+    if lith_handles:
+        if len(lith_handles) > 8:
+            extra_height = min(0.22 * len(lith_handles), 6.0)
+            fig.set_size_inches(figsize[0], figsize[1] + extra_height)
+            fig.legend(
+                handles=lith_handles,
+                title=lith_column.replace('_', ' ').title(),
+                loc='lower left',
+                bbox_to_anchor=(0.02, 0.02),
+                frameon=True,
+                framealpha=0.95,
+                facecolor='white',
+                fontsize=7.5,
+                title_fontsize=9,
+                ncol=1,
+            )
+            fig.subplots_adjust(bottom=0.36)
+        else:
+            ax.legend(
+                handles=lith_handles,
+                title=lith_column.replace('_', ' ').title(),
+                loc='upper right',
+                frameon=True,
+                framealpha=0.95,
+                facecolor='white',
+                fontsize=8,
+                title_fontsize=9,
+                ncol=1,
+            )
+
+    ax.set_facecolor('#fcfcfc')
+    if not lith_handles or len(lith_handles) <= 8:
+        plt.tight_layout()
     return fig, ax
 
 
@@ -2963,8 +3027,8 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     targets_gdf : geopandas.GeoDataFrame
         Known mineral occurrence / deposit points.
     radius_m : float
-        Any geochem sample within this distance (metres) of a deposit is
-        labelled positive (1).  All others are background (0).
+        Any geochem sample within this distance (meters) of a deposit is
+        labeled positive (1).  All others are background (0).
 
     Returns
     -------
@@ -2974,7 +3038,7 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     Notes
     -----
     The current project assumes all notebook data have already been projected
-    into the fixed analysis CRS, so distance is measured directly in metres
+    into the fixed analysis CRS, so distance is measured directly in meters
     using Euclidean nearest-neighbor search.
     """
     from scipy.spatial import cKDTree
@@ -3100,7 +3164,7 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
         the checkerboard offset/parity that preserves at least one positive in
         both train and test when possible.
     cell_size_m : float
-        Checkerboard cell size in metres.
+        Checkerboard cell size in meters.
     random_state : int
         Reserved for API stability. Not currently used.
 
@@ -3229,7 +3293,7 @@ def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
 
     plot_vector(lith_gdf, column="lithology_family", categorical=True, ax=ax,
                 title="Sample Locations and Known Deposits",
-                alpha=0.3, edgecolor="grey", linewidth=0.4,
+                alpha=0.3, edgecolor="gray", linewidth=0.4,
                 legend=False, categorical_cmap=lith_cmap)
 
     if geochem_color_col is None:
@@ -3268,7 +3332,7 @@ def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
     ax.add_artist(sample_legend)
 
     lith_handles = [
-        Patch(facecolor=color, edgecolor="grey", label=unit)
+        Patch(facecolor=color, edgecolor="gray", label=unit)
         for unit, color in zip(lith_units, unit_colors)
     ]
     ax.legend(handles=lith_handles, loc="lower left", title="Lithology units",
@@ -3329,7 +3393,7 @@ def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
     lith_ax.set_xticks([]); lith_ax.set_yticks([])
 
     label_ax = axes_flat[len(all_raster_paths) + 1]
-    plot_vector(lith_gdf, ax=label_ax, alpha=0.15, edgecolor="grey", linewidth=0.3)
+    plot_vector(lith_gdf, ax=label_ax, alpha=0.15, edgecolor="gray", linewidth=0.3)
     geochem_gdf[y == 0].plot(ax=label_ax, color="steelblue", markersize=4, alpha=0.5)
     geochem_gdf[y == 1].plot(ax=label_ax, color="red", markersize=10, alpha=0.85)
     tgt_gdf.plot(ax=label_ax, marker="*", color="gold", markersize=60,
@@ -3387,7 +3451,7 @@ def plot_probability_map(gdf_valid, y_valid, y_prob_all, lith_gdf, tgt_gdf,
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     ax = axes[0]
-    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="grey", linewidth=0.4)
+    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="gray", linewidth=0.4)
     gdf_valid[y_valid == 0].plot(ax=ax, color="steelblue", markersize=10,
                                   alpha=0.5, label="Background")
     gdf_valid[y_valid == 1].plot(ax=ax, color="red", markersize=20, alpha=0.8,
@@ -3398,7 +3462,7 @@ def plot_probability_map(gdf_valid, y_valid, y_prob_all, lith_gdf, tgt_gdf,
     ax.legend(fontsize=8)
 
     ax = axes[1]
-    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="grey", linewidth=0.4)
+    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="gray", linewidth=0.4)
     sc = ax.scatter(gdf_valid.geometry.x, gdf_valid.geometry.y,
                     c=y_prob_all, cmap="plasma", vmin=0, vmax=1,
                     s=30, alpha=0.85, zorder=3)
@@ -3429,7 +3493,7 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
     display_crs = gdf_valid.crs
 
     fig, ax = plt.subplots(figsize=figsize)
-    plot_vector(lith_gdf, ax=ax, alpha=0.15, edgecolor="grey", linewidth=0.3)
+    plot_vector(lith_gdf, ax=ax, alpha=0.15, edgecolor="gray", linewidth=0.3)
 
     # ── Checkerboard grid lines ────────────────────────────────────────────
     # The split anchors the grid at (xs.min() - x_offset, ys.min() - y_offset)
@@ -3459,12 +3523,12 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
     for x in x_lines:
         ys_line = np.linspace(y_lo, y_hi, n_seg)
         lons, lats = t.transform(np.full(n_seg, x), ys_line)
-        ax.plot(lons, lats, color="dimgrey", linewidth=0.4, alpha=0.35, zorder=2)
+        ax.plot(lons, lats, color="dimgray", linewidth=0.4, alpha=0.35, zorder=2)
 
     for y in y_lines:
         xs_line = np.linspace(x_lo, x_hi, n_seg)
         lons, lats = t.transform(xs_line, np.full(n_seg, y))
-        ax.plot(lons, lats, color="dimgrey", linewidth=0.4, alpha=0.35, zorder=2)
+        ax.plot(lons, lats, color="dimgray", linewidth=0.4, alpha=0.35, zorder=2)
 
     # ── Sample points ──────────────────────────────────────────────────────
     gdf_valid[train_mask].plot(ax=ax, color="steelblue", markersize=12,
