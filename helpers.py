@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib.patches import Patch
@@ -15,47 +16,55 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import warnings
 
 # Suppress common warnings for cleaner output
-warnings.filterwarnings('ignore', category=UserWarning)
-warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 # =============================================================================
 # Color palettes and constants
 # =============================================================================
 
-PROJECT_ROOT = Path(os.environ.get("UCB_PROJECT_ROOT", Path(__file__).resolve().parent)).resolve()
+PROJECT_ROOT = Path(
+    os.environ.get("UCB_PROJECT_ROOT", Path(__file__).resolve().parent)
+).resolve()
 DATA_ROOT = Path(os.environ.get("UCB_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
 VECTOR_CRS = "EPSG:4326"
 ANALYSIS_CRS = "EPSG:32638"
 
-CONTINUOUS_CMAP = 'viridis'
-DIVERGING_CMAP = 'RdYlBu_r'
-CATEGORICAL_COLORS = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00',
-                      '#ffff33', '#a65628', '#f781bf', '#999999']
-ANOMALY_COLORS = {'normal': '#34495E', 'anomaly': '#D35400'}
+CONTINUOUS_CMAP = "viridis"
+DIVERGING_CMAP = "RdYlBu_r"
+CATEGORICAL_COLORS = [
+    "#e41a1c",
+    "#377eb8",
+    "#4daf4a",
+    "#984ea3",
+    "#ff7f00",
+    "#ffff33",
+    "#a65628",
+    "#f781bf",
+    "#999999",
+]
+ANOMALY_COLORS = {"normal": "#34495E", "anomaly": "#D35400"}
 ALTERATION_COLORS = {
-    'Background': '#f0f0f0',
-    'Advanced Argillic': '#d73027',
-    'Phyllic': '#fc8d59',
-    'Gossan': '#fee090',
-    'Argillic': '#e0f3f8',
-    'Propylitic': '#91bfdb',
-    'Laterite': '#4575b4'
+    "Background": "#f0f0f0",
+    "Advanced Argillic": "#d73027",
+    "Phyllic": "#fc8d59",
+    "Gossan": "#fee090",
+    "Argillic": "#e0f3f8",
+    "Propylitic": "#91bfdb",
+    "Laterite": "#4575b4",
 }
 
 DEFAULT_DATA_CONFIG = {
     # Rasters
-    "continuous_raster_path": DATA_ROOT / 'raster/spectral/idx_clay_hydroxyls.tif',
+    "continuous_raster_path": DATA_ROOT / "raster/spectral/idx_clay_hydroxyls.tif",
     "categorical_raster_path": None,  # GeoTIFF with class labels
-
     # Vector data
-    "vector_path": DATA_ROOT / 'vector/lithology.geojson',
-    "geochem_points_path": DATA_ROOT / 'vector/geochem.geojson',
-
+    "vector_path": DATA_ROOT / "vector/lithology.geojson",
+    "geochem_points_path": DATA_ROOT / "vector/geochem.geojson",
     # Raster data
-    "spectral_indices_dir": DATA_ROOT / 'raster/spectral',
-    "geophysics_dir": DATA_ROOT / 'raster/geophys',
-
+    "spectral_indices_dir": DATA_ROOT / "raster/spectral",
+    "geophysics_dir": DATA_ROOT / "raster/geophys",
     # Prospectivity mapping
     "prospectivity_feature_rasters": [],  # List of raster paths (GeoTIFF)
     "prospectivity_training_points_path": None,  # GeoJSON with known deposits
@@ -65,6 +74,7 @@ DEFAULT_DATA_CONFIG = {
 # =============================================================================
 # Data summary functions
 # =============================================================================
+
 
 def summarize_geochem(gdf, feature_cols=None, max_cols=10):
     """
@@ -89,10 +99,23 @@ def summarize_geochem(gdf, feature_cols=None, max_cols=10):
 
     # Detect feature columns if not provided
     if feature_cols is None:
-        exclude = ['geometry', 'X', 'Y', 'x', 'y', 'coord_x', 'coord_y',
-                   'OBJECTID', 'FID', 'id']
-        feature_cols = [c for c in gdf.select_dtypes(include=[np.number]).columns
-                        if c not in exclude]
+        exclude = [
+            "geometry",
+            "X",
+            "Y",
+            "x",
+            "y",
+            "coord_x",
+            "coord_y",
+            "OBJECTID",
+            "FID",
+            "id",
+        ]
+        feature_cols = [
+            c
+            for c in gdf.select_dtypes(include=[np.number]).columns
+            if c not in exclude
+        ]
 
     print(f"Numeric feature columns: {len(feature_cols)}")
 
@@ -105,9 +128,9 @@ def summarize_geochem(gdf, feature_cols=None, max_cols=10):
         print(f"  Y: {ys.min():.2f} to {ys.max():.2f}")
 
     # Element groups
-    majors = [c for c in feature_cols if 'percent' in c.lower() or c.endswith('_pct')]
-    traces_ppm = [c for c in feature_cols if 'ppm' in c.lower()]
-    traces_ppb = [c for c in feature_cols if 'ppb' in c.lower()]
+    majors = [c for c in feature_cols if "percent" in c.lower() or c.endswith("_pct")]
+    traces_ppm = [c for c in feature_cols if "ppm" in c.lower()]
+    traces_ppb = [c for c in feature_cols if "ppb" in c.lower()]
 
     print(f"\nElement breakdown:")
     print(f"  Major oxides (percent): {len(majors)}")
@@ -122,14 +145,16 @@ def summarize_geochem(gdf, feature_cols=None, max_cols=10):
 
     print(f"\nMissing data:")
     print(f"  Columns with missing: {cols_with_missing} / {len(feature_cols)}")
-    print(f"  Total missing cells: {total_missing} / {total_cells} ({100*total_missing/total_cells:.1f}%)")
+    print(
+        f"  Total missing cells: {total_missing} / {total_cells} ({100*total_missing/total_cells:.1f}%)"
+    )
 
     # Quick stats for subset of columns
     print(f"\nSample statistics (first {min(max_cols, len(feature_cols))} columns):")
     print("-" * 60)
     stats_cols = feature_cols[:max_cols]
-    stats_df = gdf[stats_cols].describe().T[['mean', 'std', 'min', 'max']]
-    stats_df.columns = ['Mean', 'Std', 'Min', 'Max']
+    stats_df = gdf[stats_cols].describe().T[["mean", "std", "min", "max"]]
+    stats_df.columns = ["Mean", "Std", "Min", "Max"]
     print(stats_df.to_string())
     print("=" * 60)
 
@@ -170,7 +195,9 @@ def summarize_imputation(original_df, imputed_array, feature_cols):
             pct_missing = 100 * n_missing / len(original_df)
             # The imputed value (mean for mean imputation)
             imputed_val = imputed_df[col].iloc[original_df[col].isnull().values].mean()
-            print(f"{col:<25} {n_missing:>10} {pct_missing:>9.1f}% {imputed_val:>15.2f}")
+            print(
+                f"{col:<25} {n_missing:>10} {pct_missing:>9.1f}% {imputed_val:>15.2f}"
+            )
 
     print("=" * 60)
 
@@ -179,9 +206,19 @@ def summarize_imputation(original_df, imputed_array, feature_cols):
 # Data visualization functions
 # =============================================================================
 
-def plot_raster(data, title='Raster Data', cmap=CONTINUOUS_CMAP,
-                vmin=None, vmax=None, ax=None, colorbar=True,
-                extent=None, robust_stretch=True, origin='upper'):
+
+def plot_raster(
+    data,
+    title="Raster Data",
+    cmap=CONTINUOUS_CMAP,
+    vmin=None,
+    vmax=None,
+    ax=None,
+    colorbar=True,
+    extent=None,
+    robust_stretch=True,
+    origin="upper",
+):
     """
     Plot a 2D raster array with optional colorbar.
 
@@ -217,8 +254,7 @@ def plot_raster(data, title='Raster Data', cmap=CONTINUOUS_CMAP,
         if len(valid_data) > 0:
             vmin, vmax = np.percentile(valid_data, [2, 98])
 
-    im = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax,
-                   extent=extent, origin=origin)
+    im = ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, extent=extent, origin=origin)
     ax.set_title(title)
 
     if colorbar:
@@ -229,10 +265,20 @@ def plot_raster(data, title='Raster Data', cmap=CONTINUOUS_CMAP,
     return ax
 
 
-def plot_vector(gdf, column=None, title='Vector Data', cmap=CONTINUOUS_CMAP,
-                categorical=False, ax=None, legend=True, edgecolor='black',
-                linewidth=0.5, alpha=0.7, markersize=30,
-                categorical_cmap=None):
+def plot_vector(
+    gdf,
+    column=None,
+    title="Vector Data",
+    cmap=CONTINUOUS_CMAP,
+    categorical=False,
+    ax=None,
+    legend=True,
+    edgecolor="black",
+    linewidth=0.5,
+    alpha=0.7,
+    markersize=30,
+    categorical_cmap=None,
+):
     """
     Plot a GeoDataFrame with optional column coloring.
 
@@ -275,24 +321,42 @@ def plot_vector(gdf, column=None, title='Vector Data', cmap=CONTINUOUS_CMAP,
             cmap_obj = categorical_cmap
             if cmap_obj is None:
                 cmap_obj = mcolors.ListedColormap(
-                    CATEGORICAL_COLORS[:gdf[column].nunique()]
+                    CATEGORICAL_COLORS[: gdf[column].nunique()]
                 )
-            gdf.plot(column=column, ax=ax, legend=legend,
-                     cmap=cmap_obj,
-                     edgecolor=edgecolor, linewidth=linewidth, alpha=alpha,
-                     markersize=markersize if 'Point' in geom_type else None)
+            gdf.plot(
+                column=column,
+                ax=ax,
+                legend=legend,
+                cmap=cmap_obj,
+                edgecolor=edgecolor,
+                linewidth=linewidth,
+                alpha=alpha,
+                markersize=markersize if "Point" in geom_type else None,
+            )
         else:
-            gdf.plot(column=column, ax=ax, legend=legend, cmap=cmap,
-                     edgecolor=edgecolor, linewidth=linewidth, alpha=alpha,
-                     markersize=markersize if 'Point' in geom_type else None)
+            gdf.plot(
+                column=column,
+                ax=ax,
+                legend=legend,
+                cmap=cmap,
+                edgecolor=edgecolor,
+                linewidth=linewidth,
+                alpha=alpha,
+                markersize=markersize if "Point" in geom_type else None,
+            )
     else:
-        gdf.plot(ax=ax, edgecolor=edgecolor, linewidth=linewidth,
-                 alpha=alpha, color='steelblue',
-                 markersize=markersize if 'Point' in geom_type else None)
+        gdf.plot(
+            ax=ax,
+            edgecolor=edgecolor,
+            linewidth=linewidth,
+            alpha=alpha,
+            color="steelblue",
+            markersize=markersize if "Point" in geom_type else None,
+        )
 
     ax.set_title(title)
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
+    ax.set_xlabel("X")
+    ax.set_ylabel("Y")
 
     return ax
 
@@ -318,12 +382,15 @@ def plot_geometry_types(gdf_point, gdf_line, gdf_poly, figsize=(15, 5)):
     """
     fig, axes = plt.subplots(1, 3, figsize=figsize)
 
-    plot_vector(gdf_point, ax=axes[0], title='Point Geometries',
-                markersize=50, legend=False)
-    plot_vector(gdf_line, ax=axes[1], title='Line Geometries',
-                linewidth=2, legend=False)
-    plot_vector(gdf_poly, ax=axes[2], title='Polygon Geometries',
-                alpha=0.6, legend=False)
+    plot_vector(
+        gdf_point, ax=axes[0], title="Point Geometries", markersize=50, legend=False
+    )
+    plot_vector(
+        gdf_line, ax=axes[1], title="Line Geometries", linewidth=2, legend=False
+    )
+    plot_vector(
+        gdf_poly, ax=axes[2], title="Polygon Geometries", alpha=0.6, legend=False
+    )
 
     plt.tight_layout()
     return fig, axes
@@ -350,15 +417,16 @@ def plot_raster_vs_vector(raster_data, gdf, extent=None, figsize=(14, 6)):
     """
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    plot_raster(raster_data, ax=axes[0], title='Raster (Gridded)', extent=extent)
-    plot_vector(gdf, ax=axes[1], title='Vector (Discrete Features)')
+    plot_raster(raster_data, ax=axes[0], title="Raster (Gridded)", extent=extent)
+    plot_vector(gdf, ax=axes[1], title="Vector (Discrete Features)")
 
     plt.tight_layout()
     return fig, axes
 
 
-def plot_continuous_vs_categorical(continuous_data, categorical_data,
-                                   extent=None, figsize=(14, 6)):
+def plot_continuous_vs_categorical(
+    continuous_data, categorical_data, extent=None, figsize=(14, 6)
+):
     """
     Plot continuous and categorical rasters side by side.
 
@@ -379,22 +447,26 @@ def plot_continuous_vs_categorical(continuous_data, categorical_data,
     """
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    plot_raster(continuous_data, ax=axes[0], title='Continuous Data',
-                cmap=CONTINUOUS_CMAP, extent=extent)
+    plot_raster(
+        continuous_data,
+        ax=axes[0],
+        title="Continuous Data",
+        cmap=CONTINUOUS_CMAP,
+        extent=extent,
+    )
 
     # For categorical, use discrete colormap
     n_classes = int(np.nanmax(categorical_data)) + 1
     cmap_cat = mcolors.ListedColormap(CATEGORICAL_COLORS[:n_classes])
 
-    im = axes[1].imshow(categorical_data, cmap=cmap_cat,
-                        extent=extent, origin='upper')
-    axes[1].set_title('Categorical Data')
+    im = axes[1].imshow(categorical_data, cmap=cmap_cat, extent=extent, origin="upper")
+    axes[1].set_title("Categorical Data")
 
     # Add discrete colorbar
     divider = make_axes_locatable(axes[1])
     cax = divider.append_axes("right", size="3%", pad=0.1)
     cbar = plt.colorbar(im, cax=cax, ticks=range(n_classes))
-    cbar.set_label('Class')
+    cbar.set_label("Class")
 
     plt.tight_layout()
     return fig, axes
@@ -404,9 +476,19 @@ def plot_continuous_vs_categorical(continuous_data, categorical_data,
 # EDA and transformation plotting
 # =============================================================================
 
-def plot_distribution(data, title='Distribution', ax=None, bins=50,
-                      show_stats=True, color='steelblue', ncols=5,
-                      max_plots=None, figsize=None, titles=None):
+
+def plot_distribution(
+    data,
+    title="Distribution",
+    ax=None,
+    bins=50,
+    show_stats=True,
+    color="steelblue",
+    ncols=5,
+    max_plots=None,
+    figsize=None,
+    titles=None,
+):
     """
     Plot histogram with optional statistics overlay.
 
@@ -451,7 +533,7 @@ def plot_distribution(data, title='Distribution', ax=None, bins=50,
                 series_dict = data
             else:
                 if titles is None:
-                    titles = [f'Var {i + 1}' for i in range(np.shape(data)[1])]
+                    titles = [f"Var {i + 1}" for i in range(np.shape(data)[1])]
                 series_dict = {t: np.array(data)[:, i] for i, t in enumerate(titles)}
 
             items = list(series_dict.items())
@@ -464,14 +546,21 @@ def plot_distribution(data, title='Distribution', ax=None, bins=50,
             if figsize is None:
                 figsize = (3 * ncols, 2.5 * nrows)
 
-            fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
-                                     constrained_layout=True)
+            fig, axes = plt.subplots(
+                nrows, ncols, figsize=figsize, constrained_layout=True
+            )
             axes = np.array(axes).flatten()
             for ax_i, (label, values) in zip(axes, items):
-                plot_distribution(values, title=str(label), ax=ax_i, bins=bins,
-                                  show_stats=show_stats, color=color)
+                plot_distribution(
+                    values,
+                    title=str(label),
+                    ax=ax_i,
+                    bins=bins,
+                    show_stats=show_stats,
+                    color=color,
+                )
 
-            for ax_i in axes[len(items):]:
+            for ax_i in axes[len(items) :]:
                 ax_i.set_visible(False)
 
             if title:
@@ -483,30 +572,49 @@ def plot_distribution(data, title='Distribution', ax=None, bins=50,
     data_clean = np.array(data).flatten()
     data_clean = data_clean[~np.isnan(data_clean)]
 
-    ax.hist(data_clean, bins=bins, color=color, alpha=0.7, edgecolor='white')
+    ax.hist(data_clean, bins=bins, color=color, alpha=0.7, edgecolor="white")
     ax.set_title(title)
-    ax.set_xlabel('Value')
-    ax.set_ylabel('Frequency')
+    ax.set_xlabel("Value")
+    ax.set_ylabel("Frequency")
 
     if show_stats:
         mean_val = np.mean(data_clean)
         median_val = np.median(data_clean)
         std_val = np.std(data_clean)
 
-        ax.axvline(mean_val, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_val:.2f}')
-        ax.axvline(median_val, color='green', linestyle='-', linewidth=2, label=f'Median: {median_val:.2f}')
+        ax.axvline(
+            mean_val,
+            color="red",
+            linestyle="--",
+            linewidth=2,
+            label=f"Mean: {mean_val:.2f}",
+        )
+        ax.axvline(
+            median_val,
+            color="green",
+            linestyle="-",
+            linewidth=2,
+            label=f"Median: {median_val:.2f}",
+        )
 
-        stats_text = f'Std: {std_val:.2f}\nMin: {np.min(data_clean):.2f}\nMax: {np.max(data_clean):.2f}'
-        ax.text(0.95, 0.95, stats_text, transform=ax.transAxes,
-                verticalalignment='top', horizontalalignment='right',
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        ax.legend(loc='upper left')
+        stats_text = f"Std: {std_val:.2f}\nMin: {np.min(data_clean):.2f}\nMax: {np.max(data_clean):.2f}"
+        ax.text(
+            0.95,
+            0.95,
+            stats_text,
+            transform=ax.transAxes,
+            verticalalignment="top",
+            horizontalalignment="right",
+            bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+        )
+        ax.legend(loc="upper left")
 
     return ax
 
 
-def plot_transformation_comparison(original, transformed, transform_name='Transformed',
-                                   figsize=(14, 5)):
+def plot_transformation_comparison(
+    original, transformed, transform_name="Transformed", figsize=(14, 5)
+):
     """
     Plot original vs transformed data distributions.
 
@@ -527,15 +635,16 @@ def plot_transformation_comparison(original, transformed, transform_name='Transf
     """
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
-    plot_distribution(original, title='Original Distribution', ax=axes[0])
-    plot_distribution(transformed, title=f'{transform_name} Distribution', ax=axes[1])
+    plot_distribution(original, title="Original Distribution", ax=axes[0])
+    plot_distribution(transformed, title=f"{transform_name} Distribution", ax=axes[1])
 
     plt.tight_layout()
     return fig, axes
 
 
-def plot_correlation_matrix(df, title='Correlation Matrix', figsize=(10, 8),
-                            annot=True, cmap='coolwarm'):
+def plot_correlation_matrix(
+    df, title="Correlation Matrix", figsize=(10, 8), annot=True, cmap="coolwarm"
+):
     """
     Plot correlation matrix heatmap.
 
@@ -563,9 +672,17 @@ def plot_correlation_matrix(df, title='Correlation Matrix', figsize=(10, 8),
     corr = df.select_dtypes(include=[np.number]).corr()
     mask = np.triu(np.ones_like(corr, dtype=bool))
 
-    sns.heatmap(corr, mask=mask, cmap=cmap, center=0,
-                annot=annot, fmt='.2f', square=True,
-                linewidths=0.5, ax=ax)
+    sns.heatmap(
+        corr,
+        mask=mask,
+        cmap=cmap,
+        center=0,
+        annot=annot,
+        fmt=".2f",
+        square=True,
+        linewidths=0.5,
+        ax=ax,
+    )
     ax.set_title(title)
 
     return fig, ax
@@ -574,6 +691,7 @@ def plot_correlation_matrix(df, title='Correlation Matrix', figsize=(10, 8),
 # =============================================================================
 # Missing data visualization
 # =============================================================================
+
 
 def plot_missing_data_pattern(df, figsize=(12, 6)):
     """
@@ -597,47 +715,67 @@ def plot_missing_data_pattern(df, figsize=(12, 6)):
     missing_pct = missing_pct[missing_pct > 0]
 
     if len(missing_pct) > 0:
-        axes[0].bar(range(len(missing_pct)), missing_pct.values, color='coral', edgecolor='white')
-        axes[0].set_ylabel('Missing %')
-        axes[0].set_title('Missing % by Column')
-        axes[0].axhline(y=50, color='red', linestyle='--', alpha=0.5)
+        axes[0].bar(
+            range(len(missing_pct)),
+            missing_pct.values,
+            color="coral",
+            edgecolor="white",
+        )
+        axes[0].set_ylabel("Missing %")
+        axes[0].set_title("Missing % by Column")
+        axes[0].axhline(y=50, color="red", linestyle="--", alpha=0.5)
 
         # Handle x-axis labels based on number of columns
         n_cols = len(missing_pct)
         if n_cols <= 15:
             # Show all labels
             axes[0].set_xticks(range(n_cols))
-            axes[0].set_xticklabels(missing_pct.index, rotation=45, ha='right', fontsize=8)
+            axes[0].set_xticklabels(
+                missing_pct.index, rotation=45, ha="right", fontsize=8
+            )
         elif n_cols <= 30:
             # Show every other label
             step = 2
             axes[0].set_xticks(range(0, n_cols, step))
-            axes[0].set_xticklabels(missing_pct.index[::step], rotation=45, ha='right', fontsize=7)
+            axes[0].set_xticklabels(
+                missing_pct.index[::step], rotation=45, ha="right", fontsize=7
+            )
         else:
             # Show every nth label to keep ~10-15 labels visible
             step = max(n_cols // 12, 3)
             axes[0].set_xticks(range(0, n_cols, step))
-            axes[0].set_xticklabels(missing_pct.index[::step], rotation=45, ha='right', fontsize=7)
-        axes[0].set_xlabel(f'Columns ({n_cols} with missing data)')
+            axes[0].set_xticklabels(
+                missing_pct.index[::step], rotation=45, ha="right", fontsize=7
+            )
+        axes[0].set_xlabel(f"Columns ({n_cols} with missing data)")
     else:
-        axes[0].text(0.5, 0.5, 'No missing data', ha='center', va='center',
-                     transform=axes[0].transAxes, fontsize=14)
-        axes[0].set_title('Missing % by Column')
+        axes[0].text(
+            0.5,
+            0.5,
+            "No missing data",
+            ha="center",
+            va="center",
+            transform=axes[0].transAxes,
+            fontsize=14,
+        )
+        axes[0].set_title("Missing % by Column")
 
     # Missing data heatmap (sample if large)
-    sample_df = df.iloc[:min(100, len(df)), :min(20, len(df.columns))]
+    sample_df = df.iloc[: min(100, len(df)), : min(20, len(df.columns))]
 
     import seaborn as sns
-    sns.heatmap(sample_df.isnull(), cbar=False, yticklabels=False,
-                cmap='YlOrRd', ax=axes[1])
-    axes[1].set_title('Missing Data Pattern (sample)')
-    axes[1].set_xlabel('Columns')
+
+    sns.heatmap(
+        sample_df.isnull(), cbar=False, yticklabels=False, cmap="YlOrRd", ax=axes[1]
+    )
+    axes[1].set_title("Missing Data Pattern (sample)")
+    axes[1].set_xlabel("Columns")
 
     plt.tight_layout()
     return fig, axes
 
 
-def plot_imputation_comparison(original, imputed, column_name='Value', figsize=(14, 5)):
+def plot_imputation_comparison(original, imputed, column_name="Value", figsize=(14, 5)):
     """
     Compare distributions before and after imputation.
 
@@ -660,21 +798,28 @@ def plot_imputation_comparison(original, imputed, column_name='Value', figsize=(
 
     # Original with missing
     orig_clean = np.array(original)[~np.isnan(original)]
-    axes[0].hist(orig_clean, bins=30, alpha=0.7, color='steelblue',
-                 label='Original (observed)')
-    axes[0].set_title(f'{column_name}: Before Imputation')
-    axes[0].set_xlabel('Value')
-    axes[0].set_ylabel('Frequency')
+    axes[0].hist(
+        orig_clean, bins=30, alpha=0.7, color="steelblue", label="Original (observed)"
+    )
+    axes[0].set_title(f"{column_name}: Before Imputation")
+    axes[0].set_xlabel("Value")
+    axes[0].set_ylabel("Frequency")
     n_missing = np.sum(np.isnan(original))
-    axes[0].text(0.95, 0.95, f'N missing: {n_missing}',
-                 transform=axes[0].transAxes, ha='right', va='top',
-                 bbox=dict(facecolor='white', alpha=0.8))
+    axes[0].text(
+        0.95,
+        0.95,
+        f"N missing: {n_missing}",
+        transform=axes[0].transAxes,
+        ha="right",
+        va="top",
+        bbox=dict(facecolor="white", alpha=0.8),
+    )
 
     # After imputation
-    axes[1].hist(imputed, bins=30, alpha=0.7, color='green', label='After imputation')
-    axes[1].set_title(f'{column_name}: After Imputation')
-    axes[1].set_xlabel('Value')
-    axes[1].set_ylabel('Frequency')
+    axes[1].hist(imputed, bins=30, alpha=0.7, color="green", label="After imputation")
+    axes[1].set_title(f"{column_name}: After Imputation")
+    axes[1].set_xlabel("Value")
+    axes[1].set_ylabel("Frequency")
 
     plt.tight_layout()
     return fig, axes
@@ -684,8 +829,10 @@ def plot_imputation_comparison(original, imputed, column_name='Value', figsize=(
 # Spatial analysis visualization
 # =============================================================================
 
-def plot_semivariogram(lags, semivariance, model_fit=None, title='Semivariogram',
-                       ax=None):
+
+def plot_semivariogram(
+    lags, semivariance, model_fit=None, title="Semivariogram", ax=None
+):
     """
     Plot empirical semivariogram with optional model fit.
 
@@ -709,22 +856,23 @@ def plot_semivariogram(lags, semivariance, model_fit=None, title='Semivariogram'
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 5))
 
-    ax.scatter(lags, semivariance, color='steelblue', s=50, label='Empirical')
+    ax.scatter(lags, semivariance, color="steelblue", s=50, label="Empirical")
 
     if model_fit is not None:
-        ax.plot(lags, model_fit, color='red', linewidth=2, label='Model fit')
+        ax.plot(lags, model_fit, color="red", linewidth=2, label="Model fit")
         ax.legend()
 
-    ax.set_xlabel('Lag Distance')
-    ax.set_ylabel('Semivariance')
+    ax.set_xlabel("Lag Distance")
+    ax.set_ylabel("Semivariance")
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     return ax
 
 
-def plot_spatial_autocorrelation(gdf, values, title='Spatial Autocorrelation',
-                                 figsize=(14, 5)):
+def plot_spatial_autocorrelation(
+    gdf, values, title="Spatial Autocorrelation", figsize=(14, 5)
+):
     """
     Visualize spatial autocorrelation with map and Moran scatterplot.
 
@@ -747,10 +895,11 @@ def plot_spatial_autocorrelation(gdf, values, title='Spatial Autocorrelation',
 
     # Spatial map of values
     gdf_plot = gdf.copy()
-    gdf_plot['value'] = values
-    gdf_plot.plot(column='value', ax=axes[0], legend=True, cmap=CONTINUOUS_CMAP,
-                  markersize=30)
-    axes[0].set_title(f'{title}: Spatial Distribution')
+    gdf_plot["value"] = values
+    gdf_plot.plot(
+        column="value", ax=axes[0], legend=True, cmap=CONTINUOUS_CMAP, markersize=30
+    )
+    axes[0].set_title(f"{title}: Spatial Distribution")
 
     # Moran scatterplot (standardized value vs spatial lag)
     from scipy.spatial import KDTree
@@ -760,25 +909,30 @@ def plot_spatial_autocorrelation(gdf, values, title='Spatial Autocorrelation',
 
     # Compute spatial lag (mean of k nearest neighbors)
     k = min(8, len(coords) - 1)
-    distances, indices = tree.query(coords, k=k+1)
+    distances, indices = tree.query(coords, k=k + 1)
 
     values_std = (values - np.mean(values)) / np.std(values)
     spatial_lag = np.array([np.mean(values_std[idx[1:]]) for idx in indices])
 
-    axes[1].scatter(values_std, spatial_lag, alpha=0.5, color='steelblue')
-    axes[1].axhline(0, color='gray', linestyle='--', alpha=0.5)
-    axes[1].axvline(0, color='gray', linestyle='--', alpha=0.5)
+    axes[1].scatter(values_std, spatial_lag, alpha=0.5, color="steelblue")
+    axes[1].axhline(0, color="gray", linestyle="--", alpha=0.5)
+    axes[1].axvline(0, color="gray", linestyle="--", alpha=0.5)
 
     # Add regression line
     z = np.polyfit(values_std, spatial_lag, 1)
     p = np.poly1d(z)
     x_line = np.linspace(values_std.min(), values_std.max(), 100)
-    axes[1].plot(x_line, p(x_line), 'r-', linewidth=2,
-                 label=f'Slope (Moran\'s I proxy): {z[0]:.3f}')
+    axes[1].plot(
+        x_line,
+        p(x_line),
+        "r-",
+        linewidth=2,
+        label=f"Slope (Moran's I proxy): {z[0]:.3f}",
+    )
 
-    axes[1].set_xlabel('Standardized Value')
-    axes[1].set_ylabel('Spatial Lag')
-    axes[1].set_title('Moran Scatterplot')
+    axes[1].set_xlabel("Standardized Value")
+    axes[1].set_ylabel("Spatial Lag")
+    axes[1].set_title("Moran Scatterplot")
     axes[1].legend()
 
     plt.tight_layout()
@@ -789,9 +943,15 @@ def plot_spatial_autocorrelation(gdf, values, title='Spatial Autocorrelation',
 # ML results visualization
 # =============================================================================
 
-def plot_interpolation_results(original_points, original_values,
-                               interpolated_grid, extent, method_name='Interpolation',
-                               figsize=(14, 5)):
+
+def plot_interpolation_results(
+    original_points,
+    original_values,
+    interpolated_grid,
+    extent,
+    method_name="Interpolation",
+    figsize=(14, 5),
+):
     """
     Plot interpolation input and output side by side.
 
@@ -817,19 +977,36 @@ def plot_interpolation_results(original_points, original_values,
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     # Original points
-    sc = axes[0].scatter(original_points[:, 0], original_points[:, 1],
-                         c=original_values, cmap=CONTINUOUS_CMAP,
-                         s=50, edgecolor='white')
-    axes[0].set_title('Sample Points')
+    sc = axes[0].scatter(
+        original_points[:, 0],
+        original_points[:, 1],
+        c=original_values,
+        cmap=CONTINUOUS_CMAP,
+        s=50,
+        edgecolor="white",
+    )
+    axes[0].set_title("Sample Points")
     plt.colorbar(sc, ax=axes[0], shrink=0.8)
 
     # Interpolated surface
-    plot_raster(interpolated_grid, ax=axes[1], title=f'{method_name} Result',
-                extent=extent, robust_stretch=False, origin='lower')
+    plot_raster(
+        interpolated_grid,
+        ax=axes[1],
+        title=f"{method_name} Result",
+        extent=extent,
+        robust_stretch=False,
+        origin="lower",
+    )
 
     # Overlay points on interpolated surface
-    axes[1].scatter(original_points[:, 0], original_points[:, 1],
-                    c='red', s=10, alpha=0.5, marker='.')
+    axes[1].scatter(
+        original_points[:, 0],
+        original_points[:, 1],
+        c="red",
+        s=10,
+        alpha=0.5,
+        marker=".",
+    )
 
     plt.tight_layout()
     return fig, axes
@@ -858,35 +1035,46 @@ def plot_pca_results(pca, feature_names, figsize=(14, 5), annot=False):
     n_components = len(pca.explained_variance_ratio_)
     cum_var = np.cumsum(pca.explained_variance_ratio_)
 
-    axes[0].bar(range(1, n_components+1), pca.explained_variance_ratio_,
-                alpha=0.7, label='Individual')
-    axes[0].plot(range(1, n_components+1), cum_var, 'ro-', label='Cumulative')
-    axes[0].axhline(y=0.9, color='gray', linestyle='--', alpha=0.5)
-    axes[0].set_xlabel('Principal Component')
-    axes[0].set_ylabel('Explained Variance Ratio')
-    axes[0].set_title('PCA Explained Variance')
+    axes[0].bar(
+        range(1, n_components + 1),
+        pca.explained_variance_ratio_,
+        alpha=0.7,
+        label="Individual",
+    )
+    axes[0].plot(range(1, n_components + 1), cum_var, "ro-", label="Cumulative")
+    axes[0].axhline(y=0.9, color="gray", linestyle="--", alpha=0.5)
+    axes[0].set_xlabel("Principal Component")
+    axes[0].set_ylabel("Explained Variance Ratio")
+    axes[0].set_title("PCA Explained Variance")
     axes[0].legend()
-    axes[0].set_xticks(range(1, n_components+1))
+    axes[0].set_xticks(range(1, n_components + 1))
 
     # Loadings heatmap
     n_show = min(3, n_components)
     loadings = pd.DataFrame(
         pca.components_[:n_show].T,
-        columns=[f'PC{i+1}' for i in range(n_show)],
-        index=feature_names
+        columns=[f"PC{i+1}" for i in range(n_show)],
+        index=feature_names,
     )
 
     import seaborn as sns
-    sns.heatmap(loadings, cmap='RdBu_r', center=0, annot=annot,
-                fmt='.2f', ax=axes[1])
-    axes[1].set_title('PCA Loadings')
+
+    sns.heatmap(loadings, cmap="RdBu_r", center=0, annot=annot, fmt=".2f", ax=axes[1])
+    axes[1].set_title("PCA Loadings")
 
     plt.tight_layout()
     return fig, axes
 
 
-def plot_clustering_results(data, labels, centers=None, title='Clustering Results',
-                            ax=None, feature_x=0, feature_y=1):
+def plot_clustering_results(
+    data,
+    labels,
+    centers=None,
+    title="Clustering Results",
+    ax=None,
+    feature_x=0,
+    feature_y=1,
+):
     """
     Plot 2D clustering results.
 
@@ -917,16 +1105,29 @@ def plot_clustering_results(data, labels, centers=None, title='Clustering Result
 
     for i, color in enumerate(colors):
         mask = labels == i
-        ax.scatter(data[mask, feature_x], data[mask, feature_y],
-                   c=color, label=f'Cluster {i}', alpha=0.6, s=30)
+        ax.scatter(
+            data[mask, feature_x],
+            data[mask, feature_y],
+            c=color,
+            label=f"Cluster {i}",
+            alpha=0.6,
+            s=30,
+        )
 
     if centers is not None:
-        ax.scatter(centers[:, feature_x], centers[:, feature_y],
-                   c='black', marker='X', s=200, edgecolor='white',
-                   linewidth=2, label='Centers')
+        ax.scatter(
+            centers[:, feature_x],
+            centers[:, feature_y],
+            c="black",
+            marker="X",
+            s=200,
+            edgecolor="white",
+            linewidth=2,
+            label="Centers",
+        )
 
-    ax.set_xlabel(f'Feature {feature_x}')
-    ax.set_ylabel(f'Feature {feature_y}')
+    ax.set_xlabel(f"Feature {feature_x}")
+    ax.set_ylabel(f"Feature {feature_y}")
     ax.set_title(title)
     ax.legend()
 
@@ -942,8 +1143,9 @@ def compute_cluster_centroids(values, labels):
     return np.vstack(centroids)
 
 
-def plot_kmeans_pca_scatter(X_pca, labels, title='K-means in PCA Space',
-                            ax=None, markersize=40):
+def plot_kmeans_pca_scatter(
+    X_pca, labels, title="K-means in PCA Space", ax=None, markersize=40
+):
     """Plot PC1 vs PC2 with cluster centroids.
 
     Returns
@@ -961,24 +1163,38 @@ def plot_kmeans_pca_scatter(X_pca, labels, title='K-means in PCA Space',
 
     for i, color in enumerate(colors):
         mask = labels == i
-        ax.scatter(X_pca[mask, 0], X_pca[mask, 1],
-                   c=color, label=f'Cluster {i}', alpha=0.7, s=markersize)
+        ax.scatter(
+            X_pca[mask, 0],
+            X_pca[mask, 1],
+            c=color,
+            label=f"Cluster {i}",
+            alpha=0.7,
+            s=markersize,
+        )
 
     centroids = compute_cluster_centroids(X_pca[:, :2], labels)
-    ax.scatter(centroids[:, 0], centroids[:, 1],
-               c='black', marker='X', s=200, edgecolor='white',
-               linewidth=1.5, label='Centroids')
+    ax.scatter(
+        centroids[:, 0],
+        centroids[:, 1],
+        c="black",
+        marker="X",
+        s=200,
+        edgecolor="white",
+        linewidth=1.5,
+        label="Centroids",
+    )
 
-    ax.set_xlabel('PC1')
-    ax.set_ylabel('PC2')
+    ax.set_xlabel("PC1")
+    ax.set_ylabel("PC2")
     ax.set_title(title)
     ax.legend()
 
     return fig, ax
 
 
-def plot_elbow_silhouette(k_range, inertias, silhouettes, figsize=(14, 5),
-                          preferred_k=None):
+def plot_elbow_silhouette(
+    k_range, inertias, silhouettes, figsize=(14, 5), preferred_k=None
+):
     """
     Plot elbow curve and silhouette scores for K-means.
 
@@ -1000,37 +1216,38 @@ def plot_elbow_silhouette(k_range, inertias, silhouettes, figsize=(14, 5),
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     # Elbow plot
-    axes[0].plot(k_range, inertias, 'bo-', linewidth=2, markersize=8)
-    axes[0].set_xlabel('Number of Clusters (k)')
-    axes[0].set_ylabel('Inertia')
-    axes[0].set_title('Elbow Method')
+    axes[0].plot(k_range, inertias, "bo-", linewidth=2, markersize=8)
+    axes[0].set_xlabel("Number of Clusters (k)")
+    axes[0].set_ylabel("Inertia")
+    axes[0].set_title("Elbow Method")
     axes[0].grid(True, alpha=0.3)
 
     # Silhouette plot
-    axes[1].plot(k_range, silhouettes, 'go-', linewidth=2, markersize=8)
-    axes[1].set_xlabel('Number of Clusters (k)')
-    axes[1].set_ylabel('Silhouette Score')
-    axes[1].set_title('Silhouette Analysis')
+    axes[1].plot(k_range, silhouettes, "go-", linewidth=2, markersize=8)
+    axes[1].set_xlabel("Number of Clusters (k)")
+    axes[1].set_ylabel("Silhouette Score")
+    axes[1].set_title("Silhouette Analysis")
     axes[1].grid(True, alpha=0.3)
 
     # Mark preferred or best k
     if preferred_k is None:
         best_k_idx = np.argmax(silhouettes)
         mark_k = k_range[best_k_idx]
-        label = f'Best k={mark_k}'
+        label = f"Best k={mark_k}"
     else:
         mark_k = preferred_k
-        label = f'Preferred k={mark_k}'
+        label = f"Preferred k={mark_k}"
 
-    axes[1].axvline(mark_k, color='red', linestyle='--', label=label)
+    axes[1].axvline(mark_k, color="red", linestyle="--", label=label)
     axes[1].legend()
 
     plt.tight_layout()
     return fig, axes
 
 
-def plot_anomaly_scores(gdf, scores, binary_labels=None, title='Anomaly Detection',
-                        figsize=(14, 5)):
+def plot_anomaly_scores(
+    gdf, scores, binary_labels=None, title="Anomaly Detection", figsize=(14, 5)
+):
     """
     Plot anomaly scores as continuous and binary classification.
 
@@ -1054,37 +1271,43 @@ def plot_anomaly_scores(gdf, scores, binary_labels=None, title='Anomaly Detectio
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     gdf_plot = gdf.copy()
-    gdf_plot['score'] = scores
+    gdf_plot["score"] = scores
 
     # Continuous scores
-    gdf_plot.plot(column='score', ax=axes[0], legend=True, cmap='YlOrRd',
-                  markersize=30)
-    axes[0].set_title(f'{title}: Anomaly Scores')
+    gdf_plot.plot(column="score", ax=axes[0], legend=True, cmap="YlOrRd", markersize=30)
+    axes[0].set_title(f"{title}: Anomaly Scores")
 
     # Binary classification
     if binary_labels is not None:
-        gdf_plot['is_anomaly'] = binary_labels
+        gdf_plot["is_anomaly"] = binary_labels
 
-        normal_mask = gdf_plot['is_anomaly'] <= 0
-        anomaly_mask = gdf_plot['is_anomaly'] > 0
+        normal_mask = gdf_plot["is_anomaly"] <= 0
+        anomaly_mask = gdf_plot["is_anomaly"] > 0
 
-        gdf_plot[normal_mask].plot(ax=axes[1], color=ANOMALY_COLORS['normal'],
-                                    markersize=30, label='Normal')
-        gdf_plot[anomaly_mask].plot(ax=axes[1], color=ANOMALY_COLORS['anomaly'],
-                                     markersize=50, label='Anomaly')
+        gdf_plot[normal_mask].plot(
+            ax=axes[1], color=ANOMALY_COLORS["normal"], markersize=30, label="Normal"
+        )
+        gdf_plot[anomaly_mask].plot(
+            ax=axes[1], color=ANOMALY_COLORS["anomaly"], markersize=50, label="Anomaly"
+        )
         axes[1].legend()
     else:
         # Use threshold on scores
         threshold = np.percentile(scores, 95)
         normal_mask = scores < threshold
 
-        gdf_plot[normal_mask].plot(ax=axes[1], color=ANOMALY_COLORS['normal'],
-                                    markersize=30, label='Normal')
-        gdf_plot[~normal_mask].plot(ax=axes[1], color=ANOMALY_COLORS['anomaly'],
-                                     markersize=50, label='Anomaly (top 5%)')
+        gdf_plot[normal_mask].plot(
+            ax=axes[1], color=ANOMALY_COLORS["normal"], markersize=30, label="Normal"
+        )
+        gdf_plot[~normal_mask].plot(
+            ax=axes[1],
+            color=ANOMALY_COLORS["anomaly"],
+            markersize=50,
+            label="Anomaly (top 5%)",
+        )
         axes[1].legend()
 
-    axes[1].set_title(f'{title}: Classification')
+    axes[1].set_title(f"{title}: Classification")
 
     plt.tight_layout()
     return fig, axes
@@ -1113,22 +1336,23 @@ def plot_alteration_map(class_map, class_names=None, figsize=(10, 8)):
     fig, ax = plt.subplots(figsize=figsize)
 
     colors = list(ALTERATION_COLORS.values())
-    cmap = mcolors.ListedColormap(colors[:len(class_names)])
+    cmap = mcolors.ListedColormap(colors[: len(class_names)])
 
-    im = ax.imshow(class_map, cmap=cmap, vmin=0, vmax=len(class_names)-1)
-    ax.set_title('Alteration Type Classification')
+    im = ax.imshow(class_map, cmap=cmap, vmin=0, vmax=len(class_names) - 1)
+    ax.set_title("Alteration Type Classification")
 
     # Create legend
-    patches = [Patch(facecolor=colors[i], label=class_names[i])
-               for i in range(len(class_names))]
-    ax.legend(handles=patches, loc='center left', bbox_to_anchor=(1.02, 0.5))
+    patches = [
+        Patch(facecolor=colors[i], label=class_names[i])
+        for i in range(len(class_names))
+    ]
+    ax.legend(handles=patches, loc="center left", bbox_to_anchor=(1.02, 0.5))
 
     plt.tight_layout()
     return fig, ax
 
 
-def plot_prospectivity_map(prob_map, extent=None, threshold=0.5,
-                           figsize=(14, 5)):
+def plot_prospectivity_map(prob_map, extent=None, threshold=0.5, figsize=(14, 5)):
     """
     Plot prospectivity probability map with thresholded classification.
 
@@ -1150,22 +1374,24 @@ def plot_prospectivity_map(prob_map, extent=None, threshold=0.5,
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
     # Probability map
-    im0 = axes[0].imshow(prob_map, cmap='RdYlGn', vmin=0, vmax=1,
-                         extent=extent, origin='upper')
-    axes[0].set_title('Prospectivity Probability')
+    im0 = axes[0].imshow(
+        prob_map, cmap="RdYlGn", vmin=0, vmax=1, extent=extent, origin="upper"
+    )
+    axes[0].set_title("Prospectivity Probability")
     plt.colorbar(im0, ax=axes[0], shrink=0.8)
 
     # Thresholded
     classified = (prob_map >= threshold).astype(int)
-    cmap_binary = mcolors.ListedColormap(['#d73027', '#1a9850'])
+    cmap_binary = mcolors.ListedColormap(["#d73027", "#1a9850"])
 
-    im1 = axes[1].imshow(classified, cmap=cmap_binary,
-                         extent=extent, origin='upper')
-    axes[1].set_title(f'Prospective Areas (threshold={threshold})')
+    im1 = axes[1].imshow(classified, cmap=cmap_binary, extent=extent, origin="upper")
+    axes[1].set_title(f"Prospective Areas (threshold={threshold})")
 
-    patches = [Patch(facecolor='#d73027', label='Low'),
-               Patch(facecolor='#1a9850', label='High')]
-    axes[1].legend(handles=patches, loc='upper right')
+    patches = [
+        Patch(facecolor="#d73027", label="Low"),
+        Patch(facecolor="#1a9850", label="High"),
+    ]
+    axes[1].legend(handles=patches, loc="upper right")
 
     plt.tight_layout()
     return fig, axes
@@ -1188,7 +1414,12 @@ def plot_roc_pr_curves(y_true, y_prob, figsize=(14, 5)):
     -------
     fig, axes : tuple
     """
-    from sklearn.metrics import roc_curve, auc, precision_recall_curve, average_precision_score
+    from sklearn.metrics import (
+        roc_curve,
+        auc,
+        precision_recall_curve,
+        average_precision_score,
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
 
@@ -1196,12 +1427,13 @@ def plot_roc_pr_curves(y_true, y_prob, figsize=(14, 5)):
     fpr, tpr, _ = roc_curve(y_true, y_prob)
     roc_auc = auc(fpr, tpr)
 
-    axes[0].plot(fpr, tpr, color='steelblue', linewidth=2,
-                 label=f'ROC (AUC = {roc_auc:.3f})')
-    axes[0].plot([0, 1], [0, 1], 'k--', label='Random')
-    axes[0].set_xlabel('False Positive Rate')
-    axes[0].set_ylabel('True Positive Rate')
-    axes[0].set_title('ROC Curve')
+    axes[0].plot(
+        fpr, tpr, color="steelblue", linewidth=2, label=f"ROC (AUC = {roc_auc:.3f})"
+    )
+    axes[0].plot([0, 1], [0, 1], "k--", label="Random")
+    axes[0].set_xlabel("False Positive Rate")
+    axes[0].set_ylabel("True Positive Rate")
+    axes[0].set_title("ROC Curve")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
@@ -1210,13 +1442,15 @@ def plot_roc_pr_curves(y_true, y_prob, figsize=(14, 5)):
     ap = average_precision_score(y_true, y_prob)
     baseline = np.mean(y_true)
 
-    axes[1].plot(recall, precision, color='steelblue', linewidth=2,
-                 label=f'PR (AP = {ap:.3f})')
-    axes[1].axhline(baseline, color='gray', linestyle='--',
-                    label=f'Baseline = {baseline:.3f}')
-    axes[1].set_xlabel('Recall')
-    axes[1].set_ylabel('Precision')
-    axes[1].set_title('Precision-Recall Curve')
+    axes[1].plot(
+        recall, precision, color="steelblue", linewidth=2, label=f"PR (AP = {ap:.3f})"
+    )
+    axes[1].axhline(
+        baseline, color="gray", linestyle="--", label=f"Baseline = {baseline:.3f}"
+    )
+    axes[1].set_xlabel("Recall")
+    axes[1].set_ylabel("Precision")
+    axes[1].set_title("Precision-Recall Curve")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
@@ -1243,13 +1477,13 @@ def plot_feature_importance(importance_df, top_n=15, figsize=(10, 6)):
     """
     fig, ax = plt.subplots(figsize=figsize)
 
-    df_sorted = importance_df.nlargest(top_n, 'importance')
+    df_sorted = importance_df.nlargest(top_n, "importance")
 
-    ax.barh(range(len(df_sorted)), df_sorted['importance'], color='steelblue')
+    ax.barh(range(len(df_sorted)), df_sorted["importance"], color="steelblue")
     ax.set_yticks(range(len(df_sorted)))
-    ax.set_yticklabels(df_sorted['feature'])
-    ax.set_xlabel('Importance')
-    ax.set_title(f'Top {top_n} Feature Importances')
+    ax.set_yticklabels(df_sorted["feature"])
+    ax.set_xlabel("Importance")
+    ax.set_title(f"Top {top_n} Feature Importances")
     ax.invert_yaxis()
 
     plt.tight_layout()
@@ -1260,9 +1494,15 @@ def plot_feature_importance(importance_df, top_n=15, figsize=(10, 6)):
 # Synthetic data generation
 # =============================================================================
 
-def generate_synthetic_geochemistry(n_samples=500, n_elements=10, n_clusters=4,
-                                    spatial_extent=(0, 1000, 0, 1000),
-                                    cluster_std=100, random_state=42):
+
+def generate_synthetic_geochemistry(
+    n_samples=500,
+    n_elements=10,
+    n_clusters=4,
+    spatial_extent=(0, 1000, 0, 1000),
+    cluster_std=100,
+    random_state=42,
+):
     """
     Generate synthetic geochemistry point data with spatial clustering.
 
@@ -1294,15 +1534,18 @@ def generate_synthetic_geochemistry(n_samples=500, n_elements=10, n_clusters=4,
     xmin, xmax, ymin, ymax = spatial_extent
 
     # Generate cluster centers
-    cluster_centers_xy = np.column_stack([
-        np.random.uniform(xmin + cluster_std, xmax - cluster_std, n_clusters),
-        np.random.uniform(ymin + cluster_std, ymax - cluster_std, n_clusters)
-    ])
+    cluster_centers_xy = np.column_stack(
+        [
+            np.random.uniform(xmin + cluster_std, xmax - cluster_std, n_clusters),
+            np.random.uniform(ymin + cluster_std, ymax - cluster_std, n_clusters),
+        ]
+    )
 
     # Generate distinct geochemical signatures for each cluster
-    element_names = [f'Element_{i+1}' for i in range(n_elements)]
-    cluster_signatures = np.random.lognormal(mean=3, sigma=1,
-                                              size=(n_clusters, n_elements))
+    element_names = [f"Element_{i+1}" for i in range(n_elements)]
+    cluster_signatures = np.random.lognormal(
+        mean=3, sigma=1, size=(n_clusters, n_elements)
+    )
 
     # Assign samples to clusters
     samples_per_cluster = n_samples // n_clusters
@@ -1315,10 +1558,12 @@ def generate_synthetic_geochemistry(n_samples=500, n_elements=10, n_clusters=4,
         n_c = samples_per_cluster if c < n_clusters - 1 else n_samples - len(all_coords)
 
         # Spatial positions (clustered)
-        coords = np.column_stack([
-            np.random.normal(cluster_centers_xy[c, 0], cluster_std, n_c),
-            np.random.normal(cluster_centers_xy[c, 1], cluster_std, n_c)
-        ])
+        coords = np.column_stack(
+            [
+                np.random.normal(cluster_centers_xy[c, 0], cluster_std, n_c),
+                np.random.normal(cluster_centers_xy[c, 1], cluster_std, n_c),
+            ]
+        )
 
         # Geochemical values (based on signature + noise)
         values = cluster_signatures[c] * np.random.lognormal(0, 0.3, (n_c, n_elements))
@@ -1336,20 +1581,26 @@ def generate_synthetic_geochemistry(n_samples=500, n_elements=10, n_clusters=4,
 
     # Create GeoDataFrame
     df = pd.DataFrame(values, columns=element_names)
-    df['X'] = coords[:, 0]
-    df['Y'] = coords[:, 1]
-    df['true_cluster'] = all_labels
+    df["X"] = coords[:, 0]
+    df["Y"] = coords[:, 1]
+    df["true_cluster"] = all_labels
 
     geometry = [Point(x, y) for x, y in coords]
-    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:32610')
+    gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:32610")
 
     return gdf
 
 
-def generate_synthetic_raster(shape=(200, 200), extent=(0, 1000, 0, 1000),
-                              n_anomalies=5, anomaly_radius=30,
-                              background_mean=10, anomaly_strength=50,
-                              noise_level=2, random_state=42):
+def generate_synthetic_raster(
+    shape=(200, 200),
+    extent=(0, 1000, 0, 1000),
+    n_anomalies=5,
+    anomaly_radius=30,
+    background_mean=10,
+    anomaly_strength=50,
+    noise_level=2,
+    random_state=42,
+):
     """
     Generate synthetic continuous raster with anomalies.
 
@@ -1399,9 +1650,11 @@ def generate_synthetic_raster(shape=(200, 200), extent=(0, 1000, 0, 1000),
         # Gaussian anomaly
         for i in range(rows):
             for j in range(cols):
-                dist = np.sqrt((i - cy)**2 + (j - cx)**2)
+                dist = np.sqrt((i - cy) ** 2 + (j - cx) ** 2)
                 if dist < anomaly_radius * 2:
-                    data[i, j] += anomaly_strength * np.exp(-dist**2 / (2 * anomaly_radius**2))
+                    data[i, j] += anomaly_strength * np.exp(
+                        -(dist**2) / (2 * anomaly_radius**2)
+                    )
 
     # Add noise
     data += np.random.normal(0, noise_level, shape)
@@ -1409,8 +1662,9 @@ def generate_synthetic_raster(shape=(200, 200), extent=(0, 1000, 0, 1000),
     return data, extent
 
 
-def generate_synthetic_vector_geometries(n_points=50, n_lines=10, n_polygons=8,
-                                         extent=(0, 1000, 0, 1000), random_state=42):
+def generate_synthetic_vector_geometries(
+    n_points=50, n_lines=10, n_polygons=8, extent=(0, 1000, 0, 1000), random_state=42
+):
     """
     Generate synthetic point, line, and polygon geometries.
 
@@ -1438,11 +1692,15 @@ def generate_synthetic_vector_geometries(n_points=50, n_lines=10, n_polygons=8,
     xmin, xmax, ymin, ymax = extent
 
     # Points
-    points = [Point(np.random.uniform(xmin, xmax),
-                    np.random.uniform(ymin, ymax)) for _ in range(n_points)]
-    gdf_points = gpd.GeoDataFrame({'id': range(n_points),
-                                    'value': np.random.uniform(0, 100, n_points)},
-                                   geometry=points, crs='EPSG:32610')
+    points = [
+        Point(np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax))
+        for _ in range(n_points)
+    ]
+    gdf_points = gpd.GeoDataFrame(
+        {"id": range(n_points), "value": np.random.uniform(0, 100, n_points)},
+        geometry=points,
+        crs="EPSG:32610",
+    )
 
     # Lines (random walks)
     lines = []
@@ -1450,16 +1708,20 @@ def generate_synthetic_vector_geometries(n_points=50, n_lines=10, n_polygons=8,
         start = [np.random.uniform(xmin, xmax), np.random.uniform(ymin, ymax)]
         coords = [start]
         for _ in range(np.random.randint(3, 8)):
-            new_pt = [coords[-1][0] + np.random.normal(0, 50),
-                      coords[-1][1] + np.random.normal(0, 50)]
+            new_pt = [
+                coords[-1][0] + np.random.normal(0, 50),
+                coords[-1][1] + np.random.normal(0, 50),
+            ]
             new_pt[0] = np.clip(new_pt[0], xmin, xmax)
             new_pt[1] = np.clip(new_pt[1], ymin, ymax)
             coords.append(new_pt)
         lines.append(LineString(coords))
 
-    gdf_lines = gpd.GeoDataFrame({'id': range(n_lines),
-                                   'length': [l.length for l in lines]},
-                                  geometry=lines, crs='EPSG:32610')
+    gdf_lines = gpd.GeoDataFrame(
+        {"id": range(n_lines), "length": [l.length for l in lines]},
+        geometry=lines,
+        crs="EPSG:32610",
+    )
 
     # Polygons (random convex shapes)
     polygons = []
@@ -1467,22 +1729,26 @@ def generate_synthetic_vector_geometries(n_points=50, n_lines=10, n_polygons=8,
         cx = np.random.uniform(xmin + 50, xmax - 50)
         cy = np.random.uniform(ymin + 50, ymax - 50)
         n_vertices = np.random.randint(4, 8)
-        angles = np.sort(np.random.uniform(0, 2*np.pi, n_vertices))
+        angles = np.sort(np.random.uniform(0, 2 * np.pi, n_vertices))
         radii = np.random.uniform(20, 80, n_vertices)
-        coords = [(cx + r * np.cos(a), cy + r * np.sin(a))
-                  for a, r in zip(angles, radii)]
+        coords = [
+            (cx + r * np.cos(a), cy + r * np.sin(a)) for a, r in zip(angles, radii)
+        ]
         coords.append(coords[0])  # close polygon
         polygons.append(Polygon(coords))
 
-    gdf_polygons = gpd.GeoDataFrame({'id': range(n_polygons),
-                                      'area': [p.area for p in polygons]},
-                                     geometry=polygons, crs='EPSG:32610')
+    gdf_polygons = gpd.GeoDataFrame(
+        {"id": range(n_polygons), "area": [p.area for p in polygons]},
+        geometry=polygons,
+        crs="EPSG:32610",
+    )
 
     return gdf_points, gdf_lines, gdf_polygons
 
 
-def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
-                     random_state=42):
+def add_missing_data(
+    df, missing_pct=0.1, columns=None, pattern="random", random_state=42
+):
     """
     Add missing values to a DataFrame.
 
@@ -1512,7 +1778,7 @@ def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
 
     missing_summary = {}
     for col in columns:
-        if col in ['X', 'Y', 'geometry']:
+        if col in ["X", "Y", "geometry"]:
             continue
 
         if isinstance(missing_pct, (tuple, list)) and len(missing_pct) == 2:
@@ -1521,13 +1787,13 @@ def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
         else:
             pct = missing_pct
         n_missing = int(len(df_missing) * pct)
-        missing_summary[col] = {'pct': pct * 100, 'n': n_missing}
+        missing_summary[col] = {"pct": pct * 100, "n": n_missing}
 
-        if pattern == 'random':
+        if pattern == "random":
             missing_idx = rng.choice(df_missing.index, n_missing, replace=False)
         else:  # spatial clustering of missing values
             # Cluster missing values in one corner.
-            if 'geometry' in df_missing.columns:
+            if "geometry" in df_missing.columns:
                 xs = df_missing.geometry.x
                 ys = df_missing.geometry.y
                 corner_mask = (xs < xs.median()) & (ys < ys.median())
@@ -1536,9 +1802,10 @@ def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
                     missing_idx = rng.choice(corner_idx, n_missing, replace=False)
                 else:
                     missing_idx = rng.choice(df_missing.index, n_missing, replace=False)
-            elif 'X' in df_missing.columns and 'Y' in df_missing.columns:
-                corner_mask = (df_missing['X'] < df_missing['X'].median()) & \
-                              (df_missing['Y'] < df_missing['Y'].median())
+            elif "X" in df_missing.columns and "Y" in df_missing.columns:
+                corner_mask = (df_missing["X"] < df_missing["X"].median()) & (
+                    df_missing["Y"] < df_missing["Y"].median()
+                )
                 corner_idx = df_missing[corner_mask].index
                 if len(corner_idx) >= n_missing:
                     missing_idx = rng.choice(corner_idx, n_missing, replace=False)
@@ -1550,13 +1817,14 @@ def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
         df_missing.loc[missing_idx, col] = np.nan
 
     # Store summary as attribute for later access
-    df_missing.attrs['missing_summary'] = missing_summary
+    df_missing.attrs["missing_summary"] = missing_summary
     return df_missing
 
 
 # =============================================================================
 # I/O helpers
 # =============================================================================
+
 
 def load_raster(path):
     """Load a single-band raster and return data, extent, and CRS."""
@@ -1585,7 +1853,7 @@ def get_point_xy(gdf):
     if len(gdf) == 0:
         return np.empty((0, 2), dtype=float)
     geom_types = set(gdf.geometry.geom_type.unique())
-    if not geom_types.issubset({'Point'}):
+    if not geom_types.issubset({"Point"}):
         raise ValueError(f"Expected point geometries, got: {sorted(geom_types)}")
     return np.column_stack([gdf.geometry.x.to_numpy(), gdf.geometry.y.to_numpy()])
 
@@ -1605,7 +1873,9 @@ def rasterize_lithology(gdf, shape, extent, value_col=None):
     transform = from_bounds(xmin, ymin, xmax, ymax, shape[1], shape[0])
 
     if value_col is None:
-        candidates = [c for c in gdf.columns if c.lower() in ['lithology', 'unit', 'rocktype']]
+        candidates = [
+            c for c in gdf.columns if c.lower() in ["lithology", "unit", "rocktype"]
+        ]
         value_col = candidates[0] if candidates else None
 
     if value_col is None:
@@ -1620,7 +1890,7 @@ def rasterize_lithology(gdf, shape, extent, value_col=None):
         out_shape=shape,
         transform=transform,
         fill=0,
-        dtype='int32',
+        dtype="int32",
     )
     return raster
 
@@ -1628,6 +1898,7 @@ def rasterize_lithology(gdf, shape, extent, value_col=None):
 # =============================================================================
 # Notebook workflow helpers
 # =============================================================================
+
 
 def resolve_path(path):
     """Return a project-rooted absolute path for relative inputs."""
@@ -1659,7 +1930,9 @@ def require_one(path_candidates, label):
         candidates.append(path)
         if path.exists():
             return path
-    raise ValueError(f"Missing required output for {label}: {', '.join(str(p) for p in candidates)}")
+    raise ValueError(
+        f"Missing required output for {label}: {', '.join(str(p) for p in candidates)}"
+    )
 
 
 def load_training_data(data_config=None):
@@ -1676,42 +1949,50 @@ def load_training_data(data_config=None):
     """
     if data_config is None:
         data_config = DEFAULT_DATA_CONFIG
-    continuous_path = require_path(data_config.get('continuous_raster_path'), 'continuous_raster_path')
+    continuous_path = require_path(
+        data_config.get("continuous_raster_path"), "continuous_raster_path"
+    )
     continuous_raster, raster_extent, raster_crs = load_raster(continuous_path)
     working_crs = ANALYSIS_CRS
 
-    vector_path = require_path(data_config.get('vector_path'), 'vector_path')
+    vector_path = require_path(data_config.get("vector_path"), "vector_path")
     vector_gdf = to_analysis_crs(load_vector(vector_path))
 
-    if data_config.get('categorical_raster_path'):
-        categorical_path = require_path(data_config.get('categorical_raster_path'), 'categorical_raster_path')
+    if data_config.get("categorical_raster_path"):
+        categorical_path = require_path(
+            data_config.get("categorical_raster_path"), "categorical_raster_path"
+        )
         categorical_raster, _, _ = load_raster(categorical_path)
     else:
-        categorical_raster = rasterize_lithology(vector_gdf, continuous_raster.shape, raster_extent)
+        categorical_raster = rasterize_lithology(
+            vector_gdf, continuous_raster.shape, raster_extent
+        )
 
-    geochem_path = require_path(data_config.get('geochem_points_path'), 'geochem_points_path')
+    geochem_path = require_path(
+        data_config.get("geochem_points_path"), "geochem_points_path"
+    )
     geochem_gdf = to_analysis_crs(load_vector(geochem_path))
 
-    print('\nTotal Files: 16 \n - Vector Files: 3 \n - Raster Files: 13\n')
-    print('Raster shape:', continuous_raster.shape)
-    print('Working CRS:', working_crs)
-    print('Vector records:', len(vector_gdf))
-    print('Geochem records:', len(geochem_gdf))
-    
+    print("\nTotal Files: 16 \n - Vector Files: 3 \n - Raster Files: 13\n")
+    print("Raster shape:", continuous_raster.shape)
+    print("Working CRS:", working_crs)
+    print("Vector records:", len(vector_gdf))
+    print("Geochem records:", len(geochem_gdf))
 
     return {
-        'continuous_raster': continuous_raster,
-        'raster_extent': raster_extent,
-        'raster_crs': raster_crs,
-        'working_crs': working_crs,
-        'vector_gdf': vector_gdf,
-        'categorical_raster': categorical_raster,
-        'geochem_gdf': geochem_gdf,
+        "continuous_raster": continuous_raster,
+        "raster_extent": raster_extent,
+        "raster_crs": raster_crs,
+        "working_crs": working_crs,
+        "vector_gdf": vector_gdf,
+        "categorical_raster": categorical_raster,
+        "geochem_gdf": geochem_gdf,
     }
 
 
-def plot_data_format_examples(data_config=None, vector_gdf=None, geochem_gdf=None,
-                              figsize=(12, 10)):
+def plot_data_format_examples(
+    data_config=None, vector_gdf=None, geochem_gdf=None, figsize=(12, 10)
+):
     """Plot example vector and raster formats from configured paths."""
     if data_config is None:
         data_config = DEFAULT_DATA_CONFIG
@@ -1719,30 +2000,43 @@ def plot_data_format_examples(data_config=None, vector_gdf=None, geochem_gdf=Non
 
     fig, axes = plt.subplots(2, 2, figsize=figsize)
 
-    plot_vector(vector_gdf, ax=axes[0, 0], title='Lithology (Polygons)', categorical=True)
-    plot_vector(geochem_gdf, ax=axes[0, 1], title='Geochem (Points)', markersize=30)
+    plot_vector(
+        vector_gdf, ax=axes[0, 0], title="Lithology (Polygons)", categorical=True
+    )
+    plot_vector(geochem_gdf, ax=axes[0, 1], title="Geochem (Points)", markersize=30)
 
-    geo_dir = require_path(data_config.get('geophysics_dir'), 'geophysics_dir', allow_dir=True)
-    geo_tifs = sorted(Path(geo_dir).glob('*.tif'))
+    geo_dir = require_path(
+        data_config.get("geophysics_dir"), "geophysics_dir", allow_dir=True
+    )
+    geo_tifs = sorted(Path(geo_dir).glob("*.tif"))
     if not geo_tifs:
         raise ValueError(f"No GeoTIFFs found in {geo_dir}")
 
     geophys_data, geophys_extent, _ = load_raster(geo_tifs[0])
-    plot_raster(geophys_data, ax=axes[1, 0], title='Geophysics (Raster)', extent=geophys_extent)
+    plot_raster(
+        geophys_data, ax=axes[1, 0], title="Geophysics (Raster)", extent=geophys_extent
+    )
 
-    spec_dir = require_path(data_config.get('spectral_indices_dir'), 'spectral_indices_dir', allow_dir=True)
-    spec_tifs = sorted(Path(spec_dir).glob('*.tif'))
+    spec_dir = require_path(
+        data_config.get("spectral_indices_dir"), "spectral_indices_dir", allow_dir=True
+    )
+    spec_tifs = sorted(Path(spec_dir).glob("*.tif"))
     if not spec_tifs:
         raise ValueError(f"No GeoTIFFs found in {spec_dir}")
 
     spectral_data, spectral_extent, _ = load_raster(spec_tifs[0])
-    plot_raster(spectral_data, ax=axes[1, 1], title='Spectral Index (Raster)', extent=spectral_extent)
+    plot_raster(
+        spectral_data,
+        ax=axes[1, 1],
+        title="Spectral Index (Raster)",
+        extent=spectral_extent,
+    )
 
     plt.tight_layout()
     return fig, axes
 
 
-def prepare_geochem_features(geochem_gdf, exclude_cols=None, value_hint='cu'):
+def prepare_geochem_features(geochem_gdf, exclude_cols=None, value_hint="cu"):
     """
     Pick numeric geochemistry columns and a default example variable.
 
@@ -1753,12 +2047,12 @@ def prepare_geochem_features(geochem_gdf, exclude_cols=None, value_hint='cu'):
     ``value_hint``.
     """
     numeric_cols = geochem_gdf.select_dtypes(include=[np.number]).columns.tolist()
-    base_exclude = {'X', 'Y', 'id', 'coord_x', 'coord_y', 'elevation_m'}
+    base_exclude = {"X", "Y", "id", "coord_x", "coord_y", "elevation_m"}
     if exclude_cols:
         base_exclude.update(exclude_cols)
     feature_cols = [c for c in numeric_cols if c not in base_exclude]
     if not feature_cols:
-        raise ValueError('No numeric feature columns found in geochem data.')
+        raise ValueError("No numeric feature columns found in geochem data.")
 
     value_candidates = [c for c in numeric_cols if value_hint in c.lower()]
     value_col = value_candidates[0] if value_candidates else feature_cols[0]
@@ -1775,11 +2069,11 @@ def log_transform(values):
     return np.log1p(values - shift + 1)
 
 
-def apply_transform(values, transform='log1p'):
+def apply_transform(values, transform="log1p"):
     """Apply a named transform to values."""
-    if transform in (None, 'none', 'identity'):
+    if transform in (None, "none", "identity"):
         return np.array(values, dtype=float)
-    if transform == 'log1p':
+    if transform == "log1p":
         return log_transform(values)
     raise ValueError(f"Unsupported transform: {transform}")
 
@@ -1815,25 +2109,30 @@ def mean_impute(values):
     """Apply mean imputation and return imputed values and the imputer."""
     from sklearn.impute import SimpleImputer
 
-    imputer = SimpleImputer(strategy='mean')
+    imputer = SimpleImputer(strategy="mean")
     imputed_values = imputer.fit_transform(values)
     return imputed_values, imputer
 
 
-def impute_values(values, strategy='mean'):
+def impute_values(values, strategy="mean"):
     """Apply imputation and return imputed values and the imputer."""
     from sklearn.impute import SimpleImputer
 
-    if strategy not in {'mean', 'median', 'most_frequent'}:
+    if strategy not in {"mean", "median", "most_frequent"}:
         raise ValueError(f"Unsupported impute strategy: {strategy}")
     imputer = SimpleImputer(strategy=strategy)
     imputed_values = imputer.fit_transform(values)
     return imputed_values, imputer
 
 
-def prepare_pca_inputs(geochem_gdf, feature_cols=None, exclude_cols=None,
-                       transform='log1p', scale_features=True,
-                       clip_quantiles_range=None):
+def prepare_pca_inputs(
+    geochem_gdf,
+    feature_cols=None,
+    exclude_cols=None,
+    transform="log1p",
+    scale_features=True,
+    clip_quantiles_range=None,
+):
     """
     Build the numeric matrix used as input to PCA.
 
@@ -1856,7 +2155,7 @@ def prepare_pca_inputs(geochem_gdf, feature_cols=None, exclude_cols=None,
     if feature_cols is None:
         feature_cols = get_geochem_columns(geochem_gdf)
 
-    pca_exclude = {'id', 'elevation_m'}
+    pca_exclude = {"id", "elevation_m"}
     if exclude_cols:
         pca_exclude.update(exclude_cols)
     pca_cols = [c for c in feature_cols if c not in pca_exclude]
@@ -1874,11 +2173,11 @@ def prepare_pca_inputs(geochem_gdf, feature_cols=None, exclude_cols=None,
     print(f"Original dimensions: {X_geochem.shape[1]}")
 
     return {
-        'X_geochem': X_geochem,
-        'X_log': X_transformed,
-        'X_scaled': X_scaled,
-        'pca_cols': pca_cols,
-        'scaler': scaler,
+        "X_geochem": X_geochem,
+        "X_log": X_transformed,
+        "X_scaled": X_scaled,
+        "pca_cols": pca_cols,
+        "scaler": scaler,
     }
 
 
@@ -1888,31 +2187,41 @@ def plot_pca_variance(pca, figsize=(7, 5)):
     n_components = len(pca.explained_variance_ratio_)
     cum_var = np.cumsum(pca.explained_variance_ratio_)
 
-    ax.bar(range(1, n_components + 1), pca.explained_variance_ratio_,
-           alpha=0.7, label='Individual')
-    ax.plot(range(1, n_components + 1), cum_var, 'ro-', label='Cumulative')
+    ax.bar(
+        range(1, n_components + 1),
+        pca.explained_variance_ratio_,
+        alpha=0.7,
+        label="Individual",
+    )
+    ax.plot(range(1, n_components + 1), cum_var, "ro-", label="Cumulative")
     thresholds = [0.5, 0.75, 0.9]
-    colors = ['#8e6c8a', '#5b8c5a', '#6c757d']
+    colors = ["#8e6c8a", "#5b8c5a", "#6c757d"]
     for thresh, color in zip(thresholds, colors):
         idx = np.argmax(cum_var >= thresh) + 1
-        ax.axhline(y=thresh, color=color, linestyle='--', alpha=0.6)
-        ax.axvline(x=idx, color=color, linestyle=':', alpha=0.6)
-        ax.text(idx + 0.2, thresh + 0.02, f'{int(thresh*100)}% -> {idx} PCs',
-                color=color, fontsize=9)
-    ax.set_xlabel('Principal Component')
-    ax.set_ylabel('Explained Variance Ratio')
-    ax.set_title('PCA Explained Variance')
+        ax.axhline(y=thresh, color=color, linestyle="--", alpha=0.6)
+        ax.axvline(x=idx, color=color, linestyle=":", alpha=0.6)
+        ax.text(
+            idx + 0.2,
+            thresh + 0.02,
+            f"{int(thresh*100)}% -> {idx} PCs",
+            color=color,
+            fontsize=9,
+        )
+    ax.set_xlabel("Principal Component")
+    ax.set_ylabel("Explained Variance Ratio")
+    ax.set_title("PCA Explained Variance")
     tick_step = max(1, n_components // 12)
     ax.set_xticks(range(1, n_components + 1, tick_step))
-    ax.tick_params(axis='x', labelrotation=45)
+    ax.tick_params(axis="x", labelrotation=45)
     ax.legend()
 
     plt.tight_layout()
     return fig, ax
 
 
-def plot_pca_loadings(pca, feature_names, n_components=5, top_n_pos=5, top_n_neg=5,
-                      figsize=(8, 10)):
+def plot_pca_loadings(
+    pca, feature_names, n_components=5, top_n_pos=5, top_n_neg=5, figsize=(8, 10)
+):
     """Plot top positive and negative PCA loadings per component."""
     n_show = min(n_components, len(pca.components_))
     fig, axes = plt.subplots(n_show, 1, figsize=figsize)
@@ -1923,22 +2232,24 @@ def plot_pca_loadings(pca, feature_names, n_components=5, top_n_pos=5, top_n_neg
         top_pos = loadings[loadings > 0].sort_values(ascending=False).head(top_n_pos)
         top_neg = loadings[loadings < 0].sort_values().head(top_n_neg)
         top = pd.concat([top_neg, top_pos]).sort_values()
-        colors = ['#d95f02' if v < 0 else '#1b9e77' for v in top.values]
+        colors = ["#d95f02" if v < 0 else "#1b9e77" for v in top.values]
         ax.barh(top.index, top.values, color=colors)
-        ax.axvline(0, color='black', linewidth=1)
+        ax.axvline(0, color="black", linewidth=1)
         var_pct = pca.explained_variance_ratio_[i] * 100
         ax.set_title(
-            f'PC{i+1} Top +{top_n_pos} / -{top_n_neg} Loadings '
-            f'({var_pct:.1f}% variance)'
+            f"PC{i+1} Top +{top_n_pos} / -{top_n_neg} Loadings "
+            f"({var_pct:.1f}% variance)"
         )
-        ax.set_xlabel('Loading')
-        ax.tick_params(axis='y', labelsize=8)
+        ax.set_xlabel("Loading")
+        ax.tick_params(axis="y", labelsize=8)
 
     plt.tight_layout()
     return fig, axes
 
 
-def prepare_interpolation_inputs(geochem_gdf, value_col, grid_resolution=60, padding=0.05):
+def prepare_interpolation_inputs(
+    geochem_gdf, value_col, grid_resolution=60, padding=0.05
+):
     """Build interpolation grid and inputs from point data."""
     sample_coords = get_point_xy(geochem_gdf)
     sample_values = geochem_gdf[value_col].values
@@ -1954,7 +2265,7 @@ def prepare_interpolation_inputs(geochem_gdf, value_col, grid_resolution=60, pad
     width = xmax - xmin
     height = ymax - ymin
     if width <= 0 or height <= 0:
-        raise ValueError('Invalid interpolation extent.')
+        raise ValueError("Invalid interpolation extent.")
 
     if width >= height:
         nx = grid_resolution
@@ -1976,49 +2287,87 @@ def show_plot():
     plt.show()
 
 
-def run_idw_interpolation(sample_coords, sample_values, grid_points, grid_shape,
-                          interp_extent, power=2, n_neighbors=12, show=True):
+def run_idw_interpolation(
+    sample_coords,
+    sample_values,
+    grid_points,
+    grid_shape,
+    interp_extent,
+    power=2,
+    n_neighbors=12,
+    show=True,
+):
     """Run IDW interpolation and plot the result."""
-    idw_pred = idw_interpolation(sample_coords, sample_values, grid_points,
-                                 power=power, n_neighbors=n_neighbors)
+    idw_pred = idw_interpolation(
+        sample_coords, sample_values, grid_points, power=power, n_neighbors=n_neighbors
+    )
     idw_grid = idw_pred.reshape(grid_shape)
-    plot_interpolation_results(sample_coords, sample_values, idw_grid,
-                               interp_extent, method_name='IDW')
+    plot_interpolation_results(
+        sample_coords, sample_values, idw_grid, interp_extent, method_name="IDW"
+    )
     if show:
         plt.show()
     return idw_grid
 
 
-def run_kriging_interpolation(sample_coords, sample_values, grid_points, grid_shape,
-                              interp_extent, n_neighbors=12, show=True):
+def run_kriging_interpolation(
+    sample_coords,
+    sample_values,
+    grid_points,
+    grid_shape,
+    interp_extent,
+    n_neighbors=12,
+    show=True,
+):
     """Fit a variogram and run ordinary kriging with a plot."""
     lags, semivar = compute_semivariogram(sample_coords, sample_values)
     nugget, sill, range_param = fit_variogram(lags, semivar)
 
     kriging_pred, kriging_var = ordinary_kriging(
-        sample_coords, sample_values, grid_points, nugget, sill, range_param,
-        n_neighbors=n_neighbors
+        sample_coords,
+        sample_values,
+        grid_points,
+        nugget,
+        sill,
+        range_param,
+        n_neighbors=n_neighbors,
     )
     kriging_grid = kriging_pred.reshape(grid_shape)
-    plot_interpolation_results(sample_coords, sample_values, kriging_grid,
-                               interp_extent, method_name='Ordinary Kriging')
+    plot_interpolation_results(
+        sample_coords,
+        sample_values,
+        kriging_grid,
+        interp_extent,
+        method_name="Ordinary Kriging",
+    )
     if show:
         plt.show()
     return kriging_grid, kriging_var.reshape(grid_shape)
 
 
-def run_interpolation_workflow(geochem_gdf, value_col, grid_resolution=60, padding=0.05,
-                               power=2, n_neighbors=12, show=True):
+def run_interpolation_workflow(
+    geochem_gdf,
+    value_col,
+    grid_resolution=60,
+    padding=0.05,
+    power=2,
+    n_neighbors=12,
+    show=True,
+):
     """Run IDW and Kriging interpolation demos with plots."""
-    sample_coords, sample_values, grid_points, grid_shape, interp_extent = prepare_interpolation_inputs(
-        geochem_gdf, value_col, grid_resolution=grid_resolution, padding=padding
+    sample_coords, sample_values, grid_points, grid_shape, interp_extent = (
+        prepare_interpolation_inputs(
+            geochem_gdf, value_col, grid_resolution=grid_resolution, padding=padding
+        )
     )
 
-    idw_pred = idw_interpolation(sample_coords, sample_values, grid_points,
-                                 power=power, n_neighbors=n_neighbors)
+    idw_pred = idw_interpolation(
+        sample_coords, sample_values, grid_points, power=power, n_neighbors=n_neighbors
+    )
     idw_grid = idw_pred.reshape(grid_shape)
-    plot_interpolation_results(sample_coords, sample_values, idw_grid,
-                               interp_extent, method_name='IDW')
+    plot_interpolation_results(
+        sample_coords, sample_values, idw_grid, interp_extent, method_name="IDW"
+    )
     if show:
         plt.show()
 
@@ -2026,55 +2375,72 @@ def run_interpolation_workflow(geochem_gdf, value_col, grid_resolution=60, paddi
     nugget, sill, range_param = fit_variogram(lags, semivar)
 
     kriging_pred, kriging_var = ordinary_kriging(
-        sample_coords, sample_values, grid_points, nugget, sill, range_param, n_neighbors=n_neighbors
+        sample_coords,
+        sample_values,
+        grid_points,
+        nugget,
+        sill,
+        range_param,
+        n_neighbors=n_neighbors,
     )
     kriging_grid = kriging_pred.reshape(grid_shape)
-    plot_interpolation_results(sample_coords, sample_values, kriging_grid,
-                               interp_extent, method_name='Ordinary Kriging')
+    plot_interpolation_results(
+        sample_coords,
+        sample_values,
+        kriging_grid,
+        interp_extent,
+        method_name="Ordinary Kriging",
+    )
     if show:
         plt.show()
 
     return {
-        'idw_grid': idw_grid,
-        'kriging_grid': kriging_grid,
-        'kriging_variance': kriging_var.reshape(grid_shape),
-        'interp_extent': interp_extent,
+        "idw_grid": idw_grid,
+        "kriging_grid": kriging_grid,
+        "kriging_variance": kriging_var.reshape(grid_shape),
+        "interp_extent": interp_extent,
     }
 
 
-def plot_spatial_pca_components(geochem_gdf, X_pca, pca, n_components=3,
-                                cmap=DIVERGING_CMAP, figsize=(16, 5)):
+def plot_spatial_pca_components(
+    geochem_gdf, X_pca, pca, n_components=3, cmap=DIVERGING_CMAP, figsize=(16, 5)
+):
     """Plot the first few PCA components in map view."""
     fig, axes = plt.subplots(1, n_components, figsize=figsize)
     axes = np.atleast_1d(axes)
 
     for i, ax in enumerate(axes):
         if i >= X_pca.shape[1]:
-            ax.axis('off')
+            ax.axis("off")
             continue
         gdf_temp = geochem_gdf.copy()
-        gdf_temp[f'PC{i+1}'] = X_pca[:, i]
-        gdf_temp.plot(column=f'PC{i+1}', ax=ax, legend=True,
-                      cmap=cmap, markersize=30)
-        ax.set_title(f'PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)')
+        gdf_temp[f"PC{i+1}"] = X_pca[:, i]
+        gdf_temp.plot(column=f"PC{i+1}", ax=ax, legend=True, cmap=cmap, markersize=30)
+        ax.set_title(f"PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)")
 
     plt.tight_layout()
     return fig, axes
 
 
-def interactive_spatial_pca_components(geochem_gdf, X_pca, pca, n_components=5,
-                                       cmap=DIVERGING_CMAP, markersize=30,
-                                       figsize=(6, 5)):
+def interactive_spatial_pca_components(
+    geochem_gdf,
+    X_pca,
+    pca,
+    n_components=5,
+    cmap=DIVERGING_CMAP,
+    markersize=30,
+    figsize=(6, 5),
+):
     """Interactive PCA component map with dropdown selection."""
     import ipywidgets as widgets
     from IPython.display import display
 
     n_show = min(n_components, X_pca.shape[1])
     options = [
-        (f'PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)', i)
+        (f"PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)", i)
         for i in range(n_show)
     ]
-    comp_dropdown = widgets.Dropdown(options=options, description='Component')
+    comp_dropdown = widgets.Dropdown(options=options, description="Component")
     output = widgets.Output()
 
     def render(*_):
@@ -2083,16 +2449,17 @@ def interactive_spatial_pca_components(geochem_gdf, X_pca, pca, n_components=5,
             fig, ax = plt.subplots(figsize=figsize)
             i = comp_dropdown.value
             gdf_temp = geochem_gdf.copy()
-            gdf_temp['component'] = X_pca[:, i]
-            gdf_temp.plot(column='component', ax=ax, legend=True,
-                          cmap=cmap, markersize=markersize)
+            gdf_temp["component"] = X_pca[:, i]
+            gdf_temp.plot(
+                column="component", ax=ax, legend=True, cmap=cmap, markersize=markersize
+            )
             ax.set_title(
-                f'PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)'
+                f"PC{i+1} ({pca.explained_variance_ratio_[i]*100:.1f}% variance)"
             )
             display(fig)
             plt.close(fig)
 
-    comp_dropdown.observe(render, names='value')
+    comp_dropdown.observe(render, names="value")
     render()
     display(widgets.VBox([comp_dropdown, output]))
     return comp_dropdown
@@ -2103,7 +2470,7 @@ def run_pca_workflow(geochem_gdf, feature_cols, exclude_cols=None, show=True):
     from sklearn.preprocessing import StandardScaler
     from sklearn.decomposition import PCA
 
-    pca_exclude = {'id', 'elevation_m'}
+    pca_exclude = {"id", "elevation_m"}
     if exclude_cols:
         pca_exclude.update(exclude_cols)
     pca_cols = [c for c in feature_cols if c not in pca_exclude]
@@ -2127,25 +2494,30 @@ def run_pca_workflow(geochem_gdf, feature_cols, exclude_cols=None, show=True):
         plt.show()
 
     return {
-        'pca': pca,
-        'X_scaled': X_scaled,
-        'X_pca': X_pca,
-        'pca_cols': pca_cols,
+        "pca": pca,
+        "X_scaled": X_scaled,
+        "X_pca": X_pca,
+        "pca_cols": pca_cols,
     }
 
 
 def plot_silhouette_scores(k_range, silhouettes, preferred_k=None, figsize=(7, 5)):
     """Plot silhouette scores across k values."""
     fig, ax = plt.subplots(figsize=figsize)
-    ax.plot(k_range, silhouettes, 'o-', color='teal')
-    ax.set_xlabel('Number of Clusters (k)')
-    ax.set_ylabel('Silhouette Score')
-    ax.set_title('Silhouette Scores by k')
+    ax.plot(k_range, silhouettes, "o-", color="teal")
+    ax.set_xlabel("Number of Clusters (k)")
+    ax.set_ylabel("Silhouette Score")
+    ax.set_title("Silhouette Scores by k")
     ax.grid(True, alpha=0.3)
 
     if preferred_k is not None:
-        ax.axvline(preferred_k, color='tomato', linestyle='--', alpha=0.7,
-                   label=f'Chosen k = {preferred_k}')
+        ax.axvline(
+            preferred_k,
+            color="tomato",
+            linestyle="--",
+            alpha=0.7,
+            label=f"Chosen k = {preferred_k}",
+        )
         ax.legend()
 
     plt.tight_layout()
@@ -2155,21 +2527,43 @@ def plot_silhouette_scores(k_range, silhouettes, preferred_k=None, figsize=(7, 5
 def choose_lithology_column(vector_gdf, candidates=None):
     """Pick a representative lithology column if available."""
     if candidates is None:
-        candidates = ['lithology_family', 'main_lithology', 'geological_era', 'tectonic_setting']
+        candidates = [
+            "lithology_family",
+            "main_lithology",
+            "geological_era",
+            "tectonic_setting",
+        ]
     for col in candidates:
         if col in vector_gdf.columns:
             return col
     return None
 
 
-def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
-                               lith_column=None, figsize=(10, 8)):
+def plot_clusters_on_lithology(
+    vector_gdf, geochem_gdf, cluster_labels, lith_column=None, figsize=(10, 8)
+):
     """Overlay clustered points on lithology polygons."""
     fig, ax = plt.subplots(figsize=figsize)
-    cluster_colors = ['#D55E00', '#0072B2', '#009E73', '#CC79A7',
-                      '#E69F00', '#56B4E9', '#F0E442', '#999999']
-    lith_colors = ['#d9e7f5', '#eadccf', '#dbe8d2', '#e6d9eb',
-                   '#f0e3bf', '#d9e7ea', '#ecd6d6', '#dfdcf0']
+    cluster_colors = [
+        "#D55E00",
+        "#0072B2",
+        "#009E73",
+        "#CC79A7",
+        "#E69F00",
+        "#56B4E9",
+        "#F0E442",
+        "#999999",
+    ]
+    lith_colors = [
+        "#d9e7f5",
+        "#eadccf",
+        "#dbe8d2",
+        "#e6d9eb",
+        "#f0e3bf",
+        "#d9e7ea",
+        "#ecd6d6",
+        "#dfdcf0",
+    ]
 
     if lith_column is None:
         lith_column = choose_lithology_column(vector_gdf)
@@ -2194,52 +2588,61 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
             categorical=True,
             categorical_cmap=lith_cmap,
             ax=ax,
-            title='Clusters on Lithology',
+            title="Clusters on Lithology",
             alpha=0.60,
-            edgecolor='#8a8a8a',
+            edgecolor="#8a8a8a",
             linewidth=0.35,
             legend=False,
         )
         lith_handles = [
-            Patch(facecolor=color, edgecolor='#8a8a8a', linewidth=0.5, label=unit)
+            Patch(facecolor=color, edgecolor="#8a8a8a", linewidth=0.5, label=unit)
             for unit, color in zip(lith_units, lith_color_values)
         ]
     else:
-        vector_gdf.plot(ax=ax, facecolor='#ececec', edgecolor='#9aa0a6',
-                        linewidth=0.35, alpha=0.45)
-        ax.set_title('Clusters on Lithology')
+        vector_gdf.plot(
+            ax=ax, facecolor="#ececec", edgecolor="#9aa0a6", linewidth=0.35, alpha=0.45
+        )
+        ax.set_title("Clusters on Lithology")
 
     gdf_clustered = geochem_gdf.copy()
-    gdf_clustered['cluster'] = cluster_labels
+    gdf_clustered["cluster"] = cluster_labels
     unique_clusters = sorted(pd.unique(cluster_labels))
     n_clusters = len(unique_clusters)
     cluster_color_values = cluster_colors[:n_clusters]
     cluster_cmap = mcolors.ListedColormap(cluster_color_values)
     gdf_clustered.plot(
-        column='cluster',
+        column="cluster",
         ax=ax,
         legend=False,
         categorical=True,
         cmap=cluster_cmap,
         markersize=22,
-        edgecolor='black',
+        edgecolor="black",
         linewidth=0.35,
         alpha=0.95,
     )
 
     cluster_handles = [
-        plt.Line2D([0], [0], marker='o', linestyle='None',
-                   markerfacecolor=color, markeredgecolor='black',
-                   markeredgewidth=0.5, markersize=7, label=f'Cluster {cluster}')
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="None",
+            markerfacecolor=color,
+            markeredgecolor="black",
+            markeredgewidth=0.5,
+            markersize=7,
+            label=f"Cluster {cluster}",
+        )
         for cluster, color in zip(unique_clusters, cluster_color_values)
     ]
     cluster_legend = ax.legend(
         handles=cluster_handles,
-        title='Cluster Legend',
-        loc='lower left',
+        title="Cluster Legend",
+        loc="lower left",
         frameon=True,
         framealpha=0.95,
-        facecolor='white',
+        facecolor="white",
     )
     ax.add_artist(cluster_legend)
 
@@ -2249,12 +2652,12 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
             fig.set_size_inches(figsize[0], figsize[1] + extra_height)
             fig.legend(
                 handles=lith_handles,
-                title=lith_column.replace('_', ' ').title(),
-                loc='lower left',
+                title=lith_column.replace("_", " ").title(),
+                loc="lower left",
                 bbox_to_anchor=(0.02, 0.02),
                 frameon=True,
                 framealpha=0.95,
-                facecolor='white',
+                facecolor="white",
                 fontsize=7.5,
                 title_fontsize=9,
                 ncol=1,
@@ -2263,54 +2666,67 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
         else:
             ax.legend(
                 handles=lith_handles,
-                title=lith_column.replace('_', ' ').title(),
-                loc='upper right',
+                title=lith_column.replace("_", " ").title(),
+                loc="upper right",
                 frameon=True,
                 framealpha=0.95,
-                facecolor='white',
+                facecolor="white",
                 fontsize=8,
                 title_fontsize=9,
                 ncol=1,
             )
 
-    ax.set_facecolor('#fcfcfc')
+    ax.set_facecolor("#fcfcfc")
     if not lith_handles or len(lith_handles) <= 8:
         plt.tight_layout()
     return fig, ax
 
 
-def run_kmeans_overlay(vector_gdf, geochem_gdf, X_scaled, n_clusters=4,
-                       lith_column=None, show=True):
+def run_kmeans_overlay(
+    vector_gdf, geochem_gdf, X_scaled, n_clusters=4, lith_column=None, show=True
+):
     """Cluster geochemistry and plot on lithology."""
     from sklearn.cluster import KMeans
 
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     cluster_labels = kmeans.fit_predict(X_scaled)
-    plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
-                               lith_column=lith_column)
+    plot_clusters_on_lithology(
+        vector_gdf, geochem_gdf, cluster_labels, lith_column=lith_column
+    )
     if show:
         plt.show()
     return cluster_labels
 
 
-def run_isolation_forest(geochem_gdf, feature_cols, exclude_cols=None,
-                         contamination=0.05, n_estimators=200, random_state=42,
-                         show=True):
+def run_isolation_forest(
+    geochem_gdf,
+    feature_cols,
+    exclude_cols=None,
+    contamination=0.05,
+    n_estimators=200,
+    random_state=42,
+    show=True,
+):
     """Run Isolation Forest anomaly detection with a plot."""
     from sklearn.ensemble import IsolationForest
 
-    anom_exclude = {'id', 'coord_x', 'coord_y', 'elevation_m'}
+    anom_exclude = {"id", "coord_x", "coord_y", "elevation_m"}
     if exclude_cols:
         anom_exclude.update(exclude_cols)
     anom_cols = [c for c in feature_cols if c not in anom_exclude]
 
     X_anom = geochem_gdf[anom_cols].values
-    iso = IsolationForest(n_estimators=n_estimators, contamination=contamination,
-                          random_state=random_state)
+    iso = IsolationForest(
+        n_estimators=n_estimators,
+        contamination=contamination,
+        random_state=random_state,
+    )
     labels = iso.fit_predict(X_anom)
     scores = -iso.decision_function(X_anom)
 
-    plot_anomaly_scores(geochem_gdf, scores, binary_labels=labels, title='Isolation Forest')
+    plot_anomaly_scores(
+        geochem_gdf, scores, binary_labels=labels, title="Isolation Forest"
+    )
     if show:
         plt.show()
 
@@ -2319,7 +2735,7 @@ def run_isolation_forest(geochem_gdf, feature_cols, exclude_cols=None,
 
 def prepare_anomaly_inputs(geochem_gdf, feature_cols, exclude_cols=None):
     """Select numeric inputs for anomaly detection."""
-    anom_exclude = {'id', 'coord_x', 'coord_y', 'elevation_m'}
+    anom_exclude = {"id", "coord_x", "coord_y", "elevation_m"}
     if exclude_cols:
         anom_exclude.update(exclude_cols)
     anom_cols = [c for c in feature_cols if c not in anom_exclude]
@@ -2327,12 +2743,17 @@ def prepare_anomaly_inputs(geochem_gdf, feature_cols, exclude_cols=None):
     return X_anom, anom_cols
 
 
-def fit_isolation_forest_model(X_anom, contamination=0.05, n_estimators=200, random_state=42):
+def fit_isolation_forest_model(
+    X_anom, contamination=0.05, n_estimators=200, random_state=42
+):
     """Fit Isolation Forest and return labels and anomaly scores."""
     from sklearn.ensemble import IsolationForest
 
-    iso = IsolationForest(n_estimators=n_estimators, contamination=contamination,
-                          random_state=random_state)
+    iso = IsolationForest(
+        n_estimators=n_estimators,
+        contamination=contamination,
+        random_state=random_state,
+    )
     labels = iso.fit_predict(X_anom)
     scores = -iso.decision_function(X_anom)
     return labels, scores
@@ -2344,12 +2765,17 @@ def plot_anomaly_score_distribution(scores, contamination=0.05, figsize=(7, 5)):
     cutoff = np.nanpercentile(scores, 100 * (1 - contamination))
 
     fig, ax = plt.subplots(figsize=figsize)
-    ax.hist(scores, bins=30, color='slategray', edgecolor='white', alpha=0.8)
-    ax.axvline(cutoff, color='tomato', linestyle='--', linewidth=2,
-               label=f'Anomaly cutoff ({contamination:.0%})')
-    ax.set_title('Isolation Forest Score Distribution')
-    ax.set_xlabel('Anomaly score')
-    ax.set_ylabel('Count')
+    ax.hist(scores, bins=30, color="slategray", edgecolor="white", alpha=0.8)
+    ax.axvline(
+        cutoff,
+        color="tomato",
+        linestyle="--",
+        linewidth=2,
+        label=f"Anomaly cutoff ({contamination:.0%})",
+    )
+    ax.set_title("Isolation Forest Score Distribution")
+    ax.set_xlabel("Anomaly score")
+    ax.set_ylabel("Count")
     ax.legend()
 
     plt.tight_layout()
@@ -2359,19 +2785,44 @@ def plot_anomaly_score_distribution(scores, contamination=0.05, figsize=(7, 5)):
 def default_alteration_weights():
     """Default alteration weights for spectral halo classification."""
     return {
-        'Advanced Argillic': {'Clay_AlOH': 0.4, 'Silica': 0.25, 'Iron_Oxide': 0.15, 'Alt_Composite': 0.2},
-        'Phyllic': {'Clay_AlOH': 0.4, 'Iron_Oxide': 0.25, 'Silica': 0.15, 'Alt_Composite': 0.2},
-        'Argillic': {'Clay_AlOH': 0.4, 'Silica': 0.2, 'Laterite': 0.2, 'Alt_Composite': 0.2},
-        'Propylitic': {'Ferrous_Iron': 0.4, 'Clay_AlOH': 0.2, 'Laterite': 0.2, 'Silica': 0.2},
-        'Gossan': {'Iron_Oxide': 0.35, 'Gossan': 0.35, 'Silica': 0.15, 'Alt_Composite': 0.15},
-        'Laterite': {'Laterite': 0.6, 'Iron_Oxide': 0.2, 'Clay_AlOH': 0.2},
+        "Advanced Argillic": {
+            "Clay_AlOH": 0.4,
+            "Silica": 0.25,
+            "Iron_Oxide": 0.15,
+            "Alt_Composite": 0.2,
+        },
+        "Phyllic": {
+            "Clay_AlOH": 0.4,
+            "Iron_Oxide": 0.25,
+            "Silica": 0.15,
+            "Alt_Composite": 0.2,
+        },
+        "Argillic": {
+            "Clay_AlOH": 0.4,
+            "Silica": 0.2,
+            "Laterite": 0.2,
+            "Alt_Composite": 0.2,
+        },
+        "Propylitic": {
+            "Ferrous_Iron": 0.4,
+            "Clay_AlOH": 0.2,
+            "Laterite": 0.2,
+            "Silica": 0.2,
+        },
+        "Gossan": {
+            "Iron_Oxide": 0.35,
+            "Gossan": 0.35,
+            "Silica": 0.15,
+            "Alt_Composite": 0.15,
+        },
+        "Laterite": {"Laterite": 0.6, "Iron_Oxide": 0.2, "Clay_AlOH": 0.2},
     }
 
 
 def summarize_alteration_classes(class_map, class_names):
     """Print class counts for alteration classification."""
-    print('Alteration type classes:')
-    print('0: Background')
+    print("Alteration type classes:")
+    print("0: Background")
     for i, name in enumerate(class_names[1:], 1):
         count = (class_map == i).sum()
         print(f"{i}: {name} ({count} pixels, {count / class_map.size * 100:.1f}%)")
@@ -2382,11 +2833,11 @@ def load_spectral_indices_dir(spectral_dir=None):
     from pathlib import Path
 
     if spectral_dir is None:
-        spectral_dir = DEFAULT_DATA_CONFIG.get('spectral_indices_dir')
-    spectral_dir = require_path(spectral_dir, 'spectral_indices_dir', allow_dir=True)
+        spectral_dir = DEFAULT_DATA_CONFIG.get("spectral_indices_dir")
+    spectral_dir = require_path(spectral_dir, "spectral_indices_dir", allow_dir=True)
     spectral_indices = {}
     spectral_extent = None
-    for tif_path in sorted(Path(spectral_dir).glob('*.tif')):
+    for tif_path in sorted(Path(spectral_dir).glob("*.tif")):
         data, extent, _ = load_raster(tif_path)
         data = np.array(data, dtype=float)
         data[~np.isfinite(data)] = np.nan
@@ -2410,22 +2861,28 @@ def plot_spectral_indices_grid(spectral_indices, cols=3, figsize_per=(5, 4)):
     """Plot a grid of spectral indices."""
     n_indices = len(spectral_indices)
     rows = int(np.ceil(n_indices / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(figsize_per[0] * cols, figsize_per[1] * rows))
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(figsize_per[0] * cols, figsize_per[1] * rows)
+    )
     axes = np.atleast_1d(axes).ravel()
 
     for ax, (name, data) in zip(axes, spectral_indices.items()):
-        plot_raster(data, ax=ax, title=name, cmap='viridis', robust_stretch=True)
+        plot_raster(data, ax=ax, title=name, cmap="viridis", robust_stretch=True)
 
-    for ax in axes[len(spectral_indices):]:
-        ax.axis('off')
+    for ax in axes[len(spectral_indices) :]:
+        ax.axis("off")
 
     plt.tight_layout()
     return fig, axes
 
 
-def run_halo_detection_workflow(spectral_indices, presence_quantile=0.9,
-                                sigma_px=50, clip_q=(0.01, 0.99),
-                                valid_mask=None):
+def run_halo_detection_workflow(
+    spectral_indices,
+    presence_quantile=0.9,
+    sigma_px=50,
+    clip_q=(0.01, 0.99),
+    valid_mask=None,
+):
     """Compute KDE surfaces and halo masks for each spectral index."""
     kde_surfaces = {}
     halo_masks = {}
@@ -2447,24 +2904,27 @@ def plot_halo_detection_results(kde_surfaces, halo_masks, cols=3, figsize_per=(5
     """Plot KDE surfaces with halo contours."""
     n_items = len(kde_surfaces)
     rows = int(np.ceil(n_items / cols))
-    fig, axes = plt.subplots(rows, cols, figsize=(figsize_per[0] * cols, figsize_per[1] * rows))
+    fig, axes = plt.subplots(
+        rows, cols, figsize=(figsize_per[0] * cols, figsize_per[1] * rows)
+    )
     axes = np.atleast_1d(axes).ravel()
 
     for ax, (name, kde) in zip(axes, kde_surfaces.items()):
-        ax.imshow(kde, cmap='viridis', origin='upper')
-        ax.contour(halo_masks[name], levels=[0.5], colors='red', linewidths=2)
-        ax.set_title(f'{name} - High Density Halo')
-        ax.axis('off')
+        ax.imshow(kde, cmap="viridis", origin="upper")
+        ax.contour(halo_masks[name], levels=[0.5], colors="red", linewidths=2)
+        ax.set_title(f"{name} - High Density Halo")
+        ax.axis("off")
 
-    for ax in axes[len(kde_surfaces):]:
-        ax.axis('off')
+    for ax in axes[len(kde_surfaces) :]:
+        ax.axis("off")
 
     plt.tight_layout()
     return fig, axes
 
 
-def classify_alteration_types(kde_surfaces, alteration_weights, valid_mask=None,
-                              confidence_percentile=20):
+def classify_alteration_types(
+    kde_surfaces, alteration_weights, valid_mask=None, confidence_percentile=20
+):
     """Classify alteration types using weighted KDE surfaces."""
     raster_shape = next(iter(kde_surfaces.values())).shape
     kde_normalized = {name: normalize_kde(kde) for name, kde in kde_surfaces.items()}
@@ -2483,7 +2943,7 @@ def classify_alteration_types(kde_surfaces, alteration_weights, valid_mask=None,
             valid_classes.append(alt_type)
 
     if not valid_classes:
-        raise ValueError('No matching spectral indices found for alteration weights.')
+        raise ValueError("No matching spectral indices found for alteration weights.")
 
     all_scores = np.stack([alteration_scores[k] for k in valid_classes], axis=-1)
     class_map = np.argmax(all_scores, axis=-1) + 1
@@ -2491,7 +2951,9 @@ def classify_alteration_types(kde_surfaces, alteration_weights, valid_mask=None,
     max_scores = np.max(all_scores, axis=-1)
     finite_mask = np.isfinite(max_scores)
     if np.any(finite_mask):
-        confidence_threshold = np.nanpercentile(max_scores[finite_mask], confidence_percentile)
+        confidence_threshold = np.nanpercentile(
+            max_scores[finite_mask], confidence_percentile
+        )
     else:
         confidence_threshold = 0
 
@@ -2499,19 +2961,24 @@ def classify_alteration_types(kde_surfaces, alteration_weights, valid_mask=None,
     if valid_mask is not None:
         class_map[~valid_mask] = 0
 
-    class_names = ['Background'] + valid_classes
+    class_names = ["Background"] + valid_classes
     return class_map, class_names, alteration_scores
 
 
-def run_spectral_halo_workflow(spectral_dir, alteration_weights=None,
-                               presence_quantile=0.9, sigma_px=50,
-                               clip_q=(0.01, 0.99), confidence_percentile=20,
-                               show=True):
+def run_spectral_halo_workflow(
+    spectral_dir,
+    alteration_weights=None,
+    presence_quantile=0.9,
+    sigma_px=50,
+    clip_q=(0.01, 0.99),
+    confidence_percentile=20,
+    show=True,
+):
     """Load spectral indices, detect halos, and classify alteration types."""
     spectral_indices, _ = load_spectral_indices_dir(spectral_dir)
     spectral_indices = map_spectral_indices(spectral_indices)
     if not spectral_indices:
-        raise ValueError('No spectral indices matched canonical names.')
+        raise ValueError("No spectral indices matched canonical names.")
 
     first_index = next(iter(spectral_indices.values()))
     valid_mask = np.isfinite(first_index)
@@ -2548,7 +3015,8 @@ def run_spectral_halo_workflow(spectral_dir, alteration_weights=None,
     if show:
         plt.show()
 
-    print("""
+    print(
+        """
 SPECTRAL HALO CLASSIFICATION:
 -----------------------------
 This unsupervised approach identifies alteration types based on:
@@ -2560,59 +3028,61 @@ Validation should include:
 - Field verification of predicted alteration types
 - Comparison with known mineralization
 - Cross-validation with other datasets (geochemistry, geophysics)
-""")
+"""
+    )
 
     return {
-        'spectral_indices': spectral_indices,
-        'kde_surfaces': kde_surfaces,
-        'halo_masks': halo_masks,
-        'alteration_scores': alteration_scores,
-        'class_map': class_map,
-        'class_names': class_names,
+        "spectral_indices": spectral_indices,
+        "kde_surfaces": kde_surfaces,
+        "halo_masks": halo_masks,
+        "alteration_scores": alteration_scores,
+        "class_map": class_map,
+        "class_names": class_names,
     }
 
 
-def display_data_cube_viewer(ml_dir='data/ML', cube_name='DCG.nc'):
+def display_data_cube_viewer(ml_dir="data/ML", cube_name="DCG.nc"):
     """Interactive data cube viewer for ML workflow outputs."""
     from pathlib import Path
     import xarray as xr
     import ipywidgets as widgets
     from IPython.display import display, clear_output
 
-    ml_dir = require_path(ml_dir, 'ml_dir', allow_dir=True)
+    ml_dir = require_path(ml_dir, "ml_dir", allow_dir=True)
     cube_path = require_one([Path(ml_dir) / cube_name], cube_name)
 
-    print('Loaded data cube from:', cube_path)
+    print("Loaded data cube from:", cube_path)
 
     # Copy file locally if on S3 mount (required for HDF5/NetCDF random access)
     import shutil
     import tempfile
+
     local_cube_path = cube_path
-    if '/mnt/' in str(cube_path) or '/s3/' in str(cube_path):
+    if "/mnt/" in str(cube_path) or "/s3/" in str(cube_path):
         local_cube_path = Path(tempfile.gettempdir()) / Path(cube_path).name
         if not local_cube_path.exists():
-            print(f'Copying to local storage: {local_cube_path}')
+            print(f"Copying to local storage: {local_cube_path}")
             shutil.copy(cube_path, local_cube_path)
 
     try:
-        cube = xr.open_dataset(local_cube_path, engine='h5netcdf')
+        cube = xr.open_dataset(local_cube_path, engine="h5netcdf")
     except Exception:
-        cube = xr.open_dataset(local_cube_path, engine='netcdf4')
+        cube = xr.open_dataset(local_cube_path, engine="netcdf4")
     if not cube.data_vars:
         raise ValueError(f"No data variables found in {cube_path}")
 
     options = []
     for name, array in cube.data_vars.items():
-        if name == 'spatial_ref':
+        if name == "spatial_ref":
             continue
         if array.ndim <= 2:
             options.append((name, (name, None)))
         else:
             stacked = array.stack(layer=array.dims[:-2])
             for i in range(stacked.shape[0]):
-                options.append((f'{name} [layer {i + 1}]', (name, i)))
+                options.append((f"{name} [layer {i + 1}]", (name, i)))
 
-    var_dropdown = widgets.Dropdown(options=options, description='Variable')
+    var_dropdown = widgets.Dropdown(options=options, description="Variable")
     output = widgets.Output()
 
     def render(*_):
@@ -2626,18 +3096,18 @@ def display_data_cube_viewer(ml_dir='data/ML', cube_name='DCG.nc'):
                 ax.set_title(name)
                 ax.grid(True, alpha=0.3)
             elif array.ndim == 2:
-                ax.imshow(array.values, cmap='viridis')
+                ax.imshow(array.values, cmap="viridis")
                 ax.set_title(name)
-                ax.axis('off')
+                ax.axis("off")
             else:
                 stacked = array.stack(layer=array.dims[:-2])
                 data = stacked.isel(layer=layer).values
-                ax.imshow(data, cmap='viridis')
-                ax.set_title(f'{name} [layer {layer + 1}]')
-                ax.axis('off')
+                ax.imshow(data, cmap="viridis")
+                ax.set_title(f"{name} [layer {layer + 1}]")
+                ax.axis("off")
             plt.show()
 
-    var_dropdown.observe(render, names='value')
+    var_dropdown.observe(render, names="value")
     render()
     display(widgets.VBox([var_dropdown, output]))
 
@@ -2646,87 +3116,108 @@ def get_ml_artifacts(ml_dir):
     """Collect ML output artifact paths."""
     from pathlib import Path
 
-    ml_dir = require_path(ml_dir, 'ml_dir', allow_dir=True)
+    ml_dir = require_path(ml_dir, "ml_dir", allow_dir=True)
 
-    model_outputs = [require_one([Path(ml_dir) / f'output{i}.tif'], f'output{i}.tif') for i in range(1, 7)]
-    stacked_raw_path = require_one([Path(ml_dir) / 'stacked_raw.tif'], 'stacked_raw.tif')
-    stacked_result_path = require_one([Path(ml_dir) / 'stacked_result.tif'], 'stacked_result.tif')
-    shap_path = require_one([Path(ml_dir) / 'SHAP.png', Path(ml_dir) / 'SHAP.tif'], 'SHAP')
-    roc_paths = [
-        require_one([Path(ml_dir) / f'ROC{i}.png', Path(ml_dir) / f'ROC{i}.tif'], f'ROC{i}')
+    model_outputs = [
+        require_one([Path(ml_dir) / f"output{i}.tif"], f"output{i}.tif")
         for i in range(1, 7)
     ]
-    stacked_roc_path = require_one([Path(ml_dir) / 'stacked_ROC.png', Path(ml_dir) / 'stacked_ROC.tif'],
-                                   'stacked_ROC')
+    stacked_raw_path = require_one(
+        [Path(ml_dir) / "stacked_raw.tif"], "stacked_raw.tif"
+    )
+    stacked_result_path = require_one(
+        [Path(ml_dir) / "stacked_result.tif"], "stacked_result.tif"
+    )
+    shap_path = require_one(
+        [Path(ml_dir) / "SHAP.png", Path(ml_dir) / "SHAP.tif"], "SHAP"
+    )
+    roc_paths = [
+        require_one(
+            [Path(ml_dir) / f"ROC{i}.png", Path(ml_dir) / f"ROC{i}.tif"], f"ROC{i}"
+        )
+        for i in range(1, 7)
+    ]
+    stacked_roc_path = require_one(
+        [Path(ml_dir) / "stacked_ROC.png", Path(ml_dir) / "stacked_ROC.tif"],
+        "stacked_ROC",
+    )
 
     return {
-        'ml_dir': ml_dir,
-        'model_outputs': model_outputs,
-        'stacked_raw_path': stacked_raw_path,
-        'stacked_result_path': stacked_result_path,
-        'shap_path': shap_path,
-        'roc_paths': roc_paths,
-        'stacked_roc_path': stacked_roc_path,
+        "ml_dir": ml_dir,
+        "model_outputs": model_outputs,
+        "stacked_raw_path": stacked_raw_path,
+        "stacked_result_path": stacked_result_path,
+        "shap_path": shap_path,
+        "roc_paths": roc_paths,
+        "stacked_roc_path": stacked_roc_path,
     }
 
 
 def load_display(path, title):
     """Load and display either a PNG or a raster."""
-    if path.suffix.lower() == '.png':
+    if path.suffix.lower() == ".png":
         img = plt.imread(path)
         plt.figure(figsize=(6, 5))
         plt.imshow(img)
         plt.title(title)
-        plt.axis('off')
+        plt.axis("off")
         plt.show()
         return None, None
     data, extent, _ = load_raster(path)
     return data, extent
 
 
-def display_model_outputs(ml_dir='data/ML'):
+def display_model_outputs(ml_dir="data/ML"):
     """Visualize ML model outputs and stacked results."""
     artifacts = get_ml_artifacts(ml_dir)
-    print('Loaded workflow artifacts from:', artifacts['ml_dir'])
+    print("Loaded workflow artifacts from:", artifacts["ml_dir"])
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 9))
     axes = axes.ravel()
-    for ax, path in zip(axes, artifacts['model_outputs']):
+    for ax, path in zip(axes, artifacts["model_outputs"]):
         data, extent, _ = load_raster(path)
         plot_raster(data, ax=ax, title=path.stem, extent=extent, robust_stretch=True)
     plt.tight_layout()
     plt.show()
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    for ax, path in zip(axes, [artifacts['stacked_raw_path'], artifacts['stacked_result_path']]):
+    for ax, path in zip(
+        axes, [artifacts["stacked_raw_path"], artifacts["stacked_result_path"]]
+    ):
         data, extent, _ = load_raster(path)
         plot_raster(data, ax=ax, title=path.stem, extent=extent, robust_stretch=True)
     plt.tight_layout()
     plt.show()
 
 
-def display_interpretability_outputs(ml_dir='data/ML'):
+def display_interpretability_outputs(ml_dir="data/ML"):
     """Visualize interpretability outputs (SHAP and ROC curves)."""
     artifacts = get_ml_artifacts(ml_dir)
-    print('Loaded interpretability artifacts from:', artifacts['ml_dir'])
+    print("Loaded interpretability artifacts from:", artifacts["ml_dir"])
 
-    shap_path = artifacts['shap_path']
-    if shap_path.suffix.lower() == '.png':
-        load_display(shap_path, 'SHAP (Beeswarm)')
+    shap_path = artifacts["shap_path"]
+    if shap_path.suffix.lower() == ".png":
+        load_display(shap_path, "SHAP (Beeswarm)")
     else:
-        shap_data, shap_extent = load_display(shap_path, 'SHAP (Beeswarm)')
-        plot_raster(shap_data, ax=None, title='SHAP (Beeswarm)', extent=shap_extent, robust_stretch=True)
+        shap_data, shap_extent = load_display(shap_path, "SHAP (Beeswarm)")
+        plot_raster(
+            shap_data,
+            ax=None,
+            title="SHAP (Beeswarm)",
+            extent=shap_extent,
+            robust_stretch=True,
+        )
         plt.show()
 
-    roc_paths = artifacts['roc_paths']
-    roc_pngs = [p for p in roc_paths if p.suffix.lower() == '.png']
-    roc_tifs = [p for p in roc_paths if p.suffix.lower() != '.png']
+    roc_paths = artifacts["roc_paths"]
+    roc_pngs = [p for p in roc_paths if p.suffix.lower() == ".png"]
+    roc_tifs = [p for p in roc_paths if p.suffix.lower() != ".png"]
 
     if roc_tifs:
-        print('Skipping non-PNG ROC files:', [p.name for p in roc_tifs])
+        print("Skipping non-PNG ROC files:", [p.name for p in roc_tifs])
 
     if not roc_pngs:
-        raise ValueError('No ROC PNGs found; expected ROC1.png ... ROC6.png')
+        raise ValueError("No ROC PNGs found; expected ROC1.png ... ROC6.png")
 
     cols = 3
     rows = int(np.ceil(len(roc_pngs) / cols))
@@ -2736,41 +3227,50 @@ def display_interpretability_outputs(ml_dir='data/ML'):
         img = plt.imread(path)
         ax.imshow(img)
         ax.set_title(path.stem)
-        ax.axis('off')
-    for ax in axes[len(roc_pngs):]:
-        ax.axis('off')
+        ax.axis("off")
+    for ax in axes[len(roc_pngs) :]:
+        ax.axis("off")
     plt.tight_layout()
     plt.show()
 
-    stacked_roc_path = artifacts['stacked_roc_path']
-    if stacked_roc_path.suffix.lower() == '.png':
-        load_display(stacked_roc_path, 'stacked_ROC')
+    stacked_roc_path = artifacts["stacked_roc_path"]
+    if stacked_roc_path.suffix.lower() == ".png":
+        load_display(stacked_roc_path, "stacked_ROC")
     else:
-        stacked_roc_data, stacked_roc_extent = load_display(stacked_roc_path, 'stacked_ROC')
-        plot_raster(stacked_roc_data, ax=None, title='stacked_ROC', extent=stacked_roc_extent,
-                    robust_stretch=True)
+        stacked_roc_data, stacked_roc_extent = load_display(
+            stacked_roc_path, "stacked_ROC"
+        )
+        plot_raster(
+            stacked_roc_data,
+            ax=None,
+            title="stacked_ROC",
+            extent=stacked_roc_extent,
+            robust_stretch=True,
+        )
         plt.show()
 
 
-def display_workflow_outputs(ml_dir='data/ML'):
+def display_workflow_outputs(ml_dir="data/ML"):
     """Visualize ML workflow outputs (model + interpretability)."""
     display_model_outputs(ml_dir)
     display_interpretability_outputs(ml_dir)
-
 
 
 # =============================================================================
 # Interpolation helpers
 # =============================================================================
 
-def idw_interpolation(sample_coords, sample_values, grid_points, power=2, n_neighbors=12):
+
+def idw_interpolation(
+    sample_coords, sample_values, grid_points, power=2, n_neighbors=12
+):
     """Inverse Distance Weighting interpolation."""
     from scipy.spatial import KDTree
 
     tree = KDTree(sample_coords)
     distances, indices = tree.query(grid_points, k=n_neighbors)
     distances = np.maximum(distances, 1e-10)
-    weights = 1 / (distances ** power)
+    weights = 1 / (distances**power)
     weights_sum = weights.sum(axis=1, keepdims=True)
     weights_normalized = weights / weights_sum
     interpolated = np.sum(weights_normalized * sample_values[indices], axis=1)
@@ -2811,7 +3311,9 @@ def spherical_variogram(h, nugget, sill, range_param):
 
     within_range = h_norm <= 1
     result_temp = np.zeros_like(h_norm)
-    result_temp[within_range] = nugget + (sill - nugget) * (1.5 * h_norm[within_range] - 0.5 * h_norm[within_range]**3)
+    result_temp[within_range] = nugget + (sill - nugget) * (
+        1.5 * h_norm[within_range] - 0.5 * h_norm[within_range] ** 3
+    )
     result_temp[~within_range] = sill
 
     result[mask] = result_temp
@@ -2847,7 +3349,9 @@ def fit_variogram(lags, semivar):
         return nugget_init, sill_init, range_init
 
 
-def ordinary_kriging(sample_coords, sample_values, grid_points, nugget, sill, range_param, n_neighbors=12):
+def ordinary_kriging(
+    sample_coords, sample_values, grid_points, nugget, sill, range_param, n_neighbors=12
+):
     """Simple Ordinary Kriging implementation."""
     from scipy.spatial import KDTree
 
@@ -2889,7 +3393,7 @@ def ordinary_kriging(sample_coords, sample_values, grid_points, nugget, sill, ra
             predictions[i] = np.dot(weights[:n], local_values)
             variances[i] = sill - np.dot(weights[:n], k0[:n]) - weights[n]
         except Exception:
-            w = 1 / (distances ** 2)
+            w = 1 / (distances**2)
             predictions[i] = np.sum(w * local_values) / np.sum(w)
             variances[i] = np.var(local_values)
 
@@ -2900,7 +3404,10 @@ def ordinary_kriging(sample_coords, sample_values, grid_points, nugget, sill, ra
 # Spectral halo helpers
 # =============================================================================
 
-def generate_spectral_index(shape, n_anomalies=3, background=0.3, anomaly_strength=0.4, random_state=42):
+
+def generate_spectral_index(
+    shape, n_anomalies=3, background=0.3, anomaly_strength=0.4, random_state=42
+):
     """Generate synthetic spectral index with anomalous regions."""
     rng = np.random.default_rng(random_state)
     data = rng.normal(background, 0.1, shape)
@@ -2908,15 +3415,16 @@ def generate_spectral_index(shape, n_anomalies=3, background=0.3, anomaly_streng
     for _ in range(n_anomalies):
         cx, cy = rng.integers(20, 80, 2)
         radius = rng.integers(10, 25)
-        y, x = np.ogrid[:shape[0], :shape[1]]
-        mask = ((x - cx) ** 2 + (y - cy) ** 2) < radius ** 2
+        y, x = np.ogrid[: shape[0], : shape[1]]
+        mask = ((x - cx) ** 2 + (y - cy) ** 2) < radius**2
         data[mask] += rng.uniform(anomaly_strength * 0.5, anomaly_strength)
 
     return np.clip(data, 0, 1)
 
 
-def compute_halo_detection(index_data, presence_quantile=0.9, sigma_px=5,
-                           clip_q=(0.01, 0.99), valid_mask=None):
+def compute_halo_detection(
+    index_data, presence_quantile=0.9, sigma_px=5, clip_q=(0.01, 0.99), valid_mask=None
+):
     """Detect high-density halos using KDE and K-means."""
     from sklearn.cluster import KMeans
     from scipy.ndimage import gaussian_filter
@@ -2943,8 +3451,9 @@ def compute_halo_detection(index_data, presence_quantile=0.9, sigma_px=5,
     if valid_mask is not None:
         presence_mask = presence_mask & valid_mask
 
-    kde_surface = gaussian_filter(presence_mask.astype(float), sigma=sigma_px,
-                                  mode='nearest')
+    kde_surface = gaussian_filter(
+        presence_mask.astype(float), sigma=sigma_px, mode="nearest"
+    )
 
     kde_flat = kde_surface.flatten().reshape(-1, 1)
     kmeans = KMeans(n_clusters=2, random_state=42, n_init=10)
@@ -2971,22 +3480,23 @@ def normalize_kde(kde, percentile_low=2, percentile_high=98):
 
 def map_spectral_indices(spectral_indices):
     """Map raw spectral index names to canonical names for weighting."""
+
     def canonical(name):
         key = name.lower()
-        if 'clay' in key and ('hydrox' in key or 'aloh' in key):
-            return 'Clay_AlOH'
-        if 'iron_oxide' in key or 'ferric' in key or 'fe3' in key:
-            return 'Iron_Oxide'
-        if 'ferrous' in key or 'fe2' in key:
-            return 'Ferrous_Iron'
-        if 'silica' in key or 'quartz' in key:
-            return 'Silica'
-        if 'gossan' in key:
-            return 'Gossan'
-        if 'laterite' in key:
-            return 'Laterite'
-        if 'sabins' in key or 'hydrothermal' in key or 'alteration' in key:
-            return 'Alt_Composite'
+        if "clay" in key and ("hydrox" in key or "aloh" in key):
+            return "Clay_AlOH"
+        if "iron_oxide" in key or "ferric" in key or "fe3" in key:
+            return "Iron_Oxide"
+        if "ferrous" in key or "fe2" in key:
+            return "Ferrous_Iron"
+        if "silica" in key or "quartz" in key:
+            return "Silica"
+        if "gossan" in key:
+            return "Gossan"
+        if "laterite" in key:
+            return "Laterite"
+        if "sabins" in key or "hydrothermal" in key or "alteration" in key:
+            return "Alt_Composite"
         return None
 
     grouped = {}
@@ -3003,10 +3513,7 @@ def map_spectral_indices(spectral_indices):
         counts = finite_mask.sum(axis=0)
         summed = np.nansum(stacked, axis=0)
         mapped[canon] = np.divide(
-            summed,
-            counts,
-            out=np.zeros_like(summed, dtype=float),
-            where=counts > 0
+            summed, counts, out=np.zeros_like(summed, dtype=float), where=counts > 0
         )
 
     return mapped
@@ -3015,6 +3522,7 @@ def map_spectral_indices(spectral_indices):
 # =============================================================================
 # ML Workflow helpers
 # =============================================================================
+
 
 def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     """
@@ -3052,7 +3560,9 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
 
     n_pos = int(y_labels.sum())
     n_neg = int(len(y_labels) - n_pos)
-    print(f"Positive samples (within {radius_m}m of deposit): {n_pos} | Background: {n_neg}")
+    print(
+        f"Positive samples (within {radius_m}m of deposit): {n_pos} | Background: {n_neg}"
+    )
 
     return y_labels
 
@@ -3094,7 +3604,9 @@ def add_lithology_features(geochem_gdf, lith_gdf, col="lithology_family"):
     dummies = pd.get_dummies(joined[col], prefix="lith", dtype=float).reindex(
         geochem_gdf.index, fill_value=0.0
     )
-    print(f"Lithology feature columns ({len(dummies.columns)}): {list(dummies.columns)}")
+    print(
+        f"Lithology feature columns ({len(dummies.columns)}): {list(dummies.columns)}"
+    )
     return dummies
 
 
@@ -3238,7 +3750,10 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
                         "train_neg": train_neg,
                         "test_neg": test_neg,
                         "valid_class_split": (
-                            train_pos > 0 and test_pos > 0 and train_neg > 0 and test_neg > 0
+                            train_pos > 0
+                            and test_pos > 0
+                            and train_neg > 0
+                            and test_neg > 0
                         ),
                     }
                 )
@@ -3246,7 +3761,9 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
             candidates.append(candidate)
 
     if not candidates:
-        raise ValueError("Could not construct a checkerboard split from the provided points.")
+        raise ValueError(
+            "Could not construct a checkerboard split from the provided points."
+        )
 
     if y is None:
         best = min(candidates, key=lambda c: abs(c["test_size"] - c["train_size"]))
@@ -3269,8 +3786,18 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
 # Visualization helpers (wrapping boilerplate for notebook clarity)
 # =============================================================================
 
-def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
-                       geochem_color_col=None, geochem_cmap="viridis"):
+
+def plot_data_overview(
+    geochem_gdf,
+    lith_gdf,
+    tgt_gdf,
+    figsize=(10, 8),
+    geochem_color_col=None,
+    geochem_cmap="viridis",
+    spectral_dir=None,
+    geophys_dir=None,
+    raster_ncols=4,
+):
     """
     Plot the main study-area overview map used early in the notebook.
 
@@ -3278,27 +3805,41 @@ def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
     known mineral occurrences in one figure so students can orient themselves
     before moving into PCA, clustering, or supervised learning. When
     ``geochem_color_col`` is provided, the sample points are colored by that
-    numeric column and a colorbar is added automatically.
+    numeric column and a colorbar is added automatically. When raster
+    directories are provided, a second figure previews the raster stack.
     """
     from matplotlib.lines import Line2D
+    import rasterio
+    from pathlib import Path
 
     fig, ax = plt.subplots(figsize=figsize)
     lith_units = pd.Index(lith_gdf["lithology_family"].dropna().unique())
     if len(lith_units) <= len(CATEGORICAL_COLORS):
-        unit_colors = CATEGORICAL_COLORS[:len(lith_units)]
+        unit_colors = CATEGORICAL_COLORS[: len(lith_units)]
     else:
-        unit_colors = [mcolors.to_hex(plt.get_cmap("tab20", len(lith_units))(i))
-                       for i in range(len(lith_units))]
+        unit_colors = [
+            mcolors.to_hex(plt.get_cmap("tab20", len(lith_units))(i))
+            for i in range(len(lith_units))
+        ]
     lith_cmap = mcolors.ListedColormap(unit_colors)
 
-    plot_vector(lith_gdf, column="lithology_family", categorical=True, ax=ax,
-                title="Sample Locations and Known Deposits",
-                alpha=0.3, edgecolor="gray", linewidth=0.4,
-                legend=False, categorical_cmap=lith_cmap)
+    plot_vector(
+        lith_gdf,
+        column="lithology_family",
+        categorical=True,
+        ax=ax,
+        title="Sample Locations and Known Deposits",
+        alpha=0.3,
+        edgecolor="gray",
+        linewidth=0.4,
+        legend=False,
+        categorical_cmap=lith_cmap,
+    )
 
     if geochem_color_col is None:
-        geochem_gdf.plot(ax=ax, color="steelblue", markersize=15, alpha=0.7,
-                         label="Geochem samples")
+        geochem_gdf.plot(
+            ax=ax, color="steelblue", markersize=15, alpha=0.7, label="Geochem samples"
+        )
     else:
         if geochem_color_col not in geochem_gdf.columns:
             raise ValueError(f"Column not found in geochem data: {geochem_color_col}")
@@ -3319,14 +3860,38 @@ def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
         cbar = plt.colorbar(sc, cax=cax)
         cbar.set_label(geochem_color_col)
 
-    tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=180,
-                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+    tgt_gdf.plot(
+        ax=ax,
+        marker="*",
+        color="gold",
+        markersize=180,
+        edgecolor="black",
+        linewidth=0.8,
+        label="Known deposits",
+        zorder=5,
+    )
 
     sample_handles = [
-        Line2D([0], [0], marker="o", color="none", markerfacecolor="steelblue",
-               markeredgecolor="white", markersize=7, label="Geochem samples"),
-        Line2D([0], [0], marker="*", color="none", markerfacecolor="gold",
-               markeredgecolor="black", markersize=14, label="Known deposits"),
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="none",
+            markerfacecolor="steelblue",
+            markeredgecolor="white",
+            markersize=7,
+            label="Geochem samples",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker="*",
+            color="none",
+            markerfacecolor="gold",
+            markeredgecolor="black",
+            markersize=14,
+            label="Known deposits",
+        ),
     ]
     sample_legend = ax.legend(handles=sample_handles, loc="upper right", title="Legend")
     ax.add_artist(sample_legend)
@@ -3335,161 +3900,249 @@ def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
         Patch(facecolor=color, edgecolor="gray", label=unit)
         for unit, color in zip(lith_units, unit_colors)
     ]
-    ax.legend(handles=lith_handles, loc="lower left", title="Lithology units",
-              fontsize=8, title_fontsize=9)
+    ax.legend(
+        handles=lith_handles,
+        loc="lower left",
+        title="Lithology units",
+        fontsize=8,
+        title_fontsize=9,
+    )
     plt.tight_layout()
-    return fig, ax
 
+    if spectral_dir is None and geophys_dir is None:
+        return fig, ax
 
-def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
-                           y, radius_m, tgt_gdf, geochem_X, feature_cols=None,
-                           preview_elements=("Cu_ppm_icp", "Mo_ppm_icp", "Au_ppb_icp")):
-    """
-    Summarize the predictor stack used in the supervised-learning section.
+    spectral_paths = []
+    geophys_paths = []
+    if spectral_dir is not None:
+        spectral_paths = sorted(Path(spectral_dir).glob("*.tif"))
+    if geophys_dir is not None:
+        geophys_paths = sorted(Path(geophys_dir).glob("*.tif"))
+    all_raster_paths = spectral_paths + geophys_paths
 
-    Two figures are created:
-    1. A grid of raster predictor layers plus lithology and training-label
-       panels.
-    2. A small set of geochemistry pathfinder maps colored by transformed assay
-       values.
-
-    This gives students a quick visual check of what information the model is
-    learning from before the train/test split and random forest steps.
-    """
-    import rasterio
-    from pathlib import Path
-
-    spectral_dir = Path(spectral_dir)
-    geophys_dir  = Path(geophys_dir)
-    all_raster_paths = sorted(spectral_dir.glob("*.tif")) + sorted(geophys_dir.glob("*.tif"))
-
-    # ── Figure 1: rasters + lith + labels ─────────────────────────────────
-    ncols = 5
-    nrows = -(-len(all_raster_paths) // ncols) + 1
-    fig1, axes = plt.subplots(nrows, ncols, figsize=(18, nrows * 3.2))
-    axes_flat = axes.flatten()
+    ncols = max(1, raster_ncols)
+    nrows = -(-len(all_raster_paths) // ncols)
+    fig_rasters, axes = plt.subplots(nrows, ncols, figsize=(3.0 * ncols, 2.4 * nrows))
+    axes_flat = np.atleast_1d(axes).flatten()
 
     for i, path in enumerate(all_raster_paths):
-        ax = axes_flat[i]
+        ax_r = axes_flat[i]
         with rasterio.open(path) as src:
             data = src.read(1).astype(np.float64)
             if src.nodata is not None:
                 data[data == src.nodata] = np.nan
-            b = src.bounds
-            extent = (b.left, b.right, b.bottom, b.top)
-        cmap = "RdBu_r" if path.parent == geophys_dir else "YlOrBr"
+            bounds = src.bounds
+            extent = (bounds.left, bounds.right, bounds.bottom, bounds.top)
+        cmap = "RdBu_r" if path in geophys_paths else "YlOrBr"
         vmin, vmax = np.nanpercentile(data, [2, 98])
-        ax.imshow(data, extent=extent, origin="upper", aspect="auto",
-                  cmap=cmap, vmin=vmin, vmax=vmax)
-        label = ("mag " if path.parent == geophys_dir else "spec ") + \
-                path.stem.replace("idx_", "").replace("_", " ").replace("AMF", "")
-        ax.set_title(label.strip(), fontsize=7, pad=2)
-        ax.set_xticks([]); ax.set_yticks([])
+        ax_r.imshow(
+            data,
+            extent=extent,
+            origin="upper",
+            aspect="auto",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+        )
+        label = ("mag " if path in geophys_paths else "spec ") + path.stem.replace(
+            "idx_", ""
+        ).replace("_", " ").replace("AMF", "")
+        ax_r.set_title(label.strip(), fontsize=8, pad=3)
+        ax_r.set_xticks([])
+        ax_r.set_yticks([])
 
-    lith_ax = axes_flat[len(all_raster_paths)]
-    lith_gdf.plot(column="lithology_family", ax=lith_ax, cmap="tab10",
-                  alpha=0.85, legend=False)
-    lith_ax.set_title("lithology family", fontsize=7, pad=2)
-    lith_ax.set_xticks([]); lith_ax.set_yticks([])
-
-    label_ax = axes_flat[len(all_raster_paths) + 1]
-    plot_vector(lith_gdf, ax=label_ax, alpha=0.15, edgecolor="gray", linewidth=0.3)
-    geochem_gdf[y == 0].plot(ax=label_ax, color="steelblue", markersize=4, alpha=0.5)
-    geochem_gdf[y == 1].plot(ax=label_ax, color="red", markersize=10, alpha=0.85)
-    tgt_gdf.plot(ax=label_ax, marker="*", color="gold", markersize=60,
-                 edgecolor="black", linewidth=0.5, zorder=5)
-    label_ax.set_title(f"training labels (±{radius_m // 1000} km)", fontsize=7, pad=2)
-    label_ax.set_xticks([]); label_ax.set_yticks([])
-
-    for j in range(len(all_raster_paths) + 2, len(axes_flat)):
+    for j in range(len(all_raster_paths), len(axes_flat)):
         axes_flat[j].set_visible(False)
 
-    plt.suptitle(
-        f"Input Features - {len(all_raster_paths)} rasters + lithology + "
-        f"{len(feature_cols)} geochem elements (log-transformed)",
-        fontsize=11, y=1.01,
+    fig_rasters.suptitle(
+        f"Raster Data Preview - {len(all_raster_paths)} layers", fontsize=11, y=1.01
     )
-    plt.tight_layout()
+    fig_rasters.tight_layout()
+    return fig, ax, fig_rasters
 
-    # ── Figure 2: geochem pathfinder scatter ───────────────────────────────
+
+def plot_feature_overview(
+    geochem_gdf,
+    spectral_dir,
+    geophys_dir,
+    lith_gdf,
+    y,
+    radius_m,
+    tgt_gdf,
+    geochem_X,
+    X_raw,
+    predictor_names,
+    feature_cols=None,
+    preview_elements=(
+        "Cu_ppm_icp",
+        "Mo_ppm_icp",
+        "Au_ppb_icp",
+        "As_ppm_icp",
+        "Sb_ppm_icp",
+        "W_ppm_icp",
+    ),
+):
+    """
+    Summarize the predictor stack used in the supervised-learning section.
+
+    A single grid is created. The first panel shows the binary training labels
+    at the sample locations, followed by sampled lithology, several sampled
+    geochemistry maps, and the sampled raster predictors as colored points.
+
+    This gives students a quick visual check of what information the model is
+    learning from before the train/test split and Random Forest steps.
+    """
     if feature_cols is None:
         feature_cols = get_geochem_columns(geochem_gdf)
     feature_cols = list(feature_cols)
-    valid_elems = [e for e in preview_elements if e in feature_cols]
-    fig2, axes2 = plt.subplots(1, len(valid_elems), figsize=(5 * len(valid_elems), 4))
-    if len(valid_elems) == 1:
-        axes2 = [axes2]
-
+    preview_geochem_cols = [e for e in preview_elements if e in feature_cols]
+    if len(preview_geochem_cols) < 6:
+        extras = [c for c in feature_cols if c not in preview_geochem_cols]
+        preview_geochem_cols.extend(extras[: 6 - len(preview_geochem_cols)])
     xs = geochem_gdf.geometry.x.values
     ys = geochem_gdf.geometry.y.values
-    for ax, col in zip(axes2, valid_elems):
-        idx = feature_cols.index(col)
-        sc = ax.scatter(xs, ys, c=geochem_X[:, idx], cmap="plasma", s=12, linewidths=0)
-        plt.colorbar(sc, ax=ax, shrink=0.7, label="log(value + 1)")
-        parts = col.split("_")
-        ax.set_title(f"{parts[0]} ({parts[1]})", fontsize=10)
-        ax.set_xticks([]); ax.set_yticks([])
 
-    plt.suptitle(f"Geochem Pathfinders (log-transformed) - {len(valid_elems)} of {len(feature_cols)} input features",
-                 fontsize=11, y=1.02)
-    plt.tight_layout()
+    lith_col = choose_lithology_column(lith_gdf)
+    sampled_lith = None
+    if lith_col is not None:
+        joined = gpd.sjoin(
+            geochem_gdf[["geometry"]],
+            lith_gdf[[lith_col, "geometry"]],
+            how="left",
+            predicate="within",
+        )
+        joined = joined[~joined.index.duplicated(keep="first")].reindex(
+            geochem_gdf.index
+        )
+        sampled_lith = joined[lith_col].fillna("No match").astype(str)
 
-    return fig1, fig2
+    panel_specs = [("labels", "training labels", y)]
+    if sampled_lith is not None:
+        panel_specs.append(("lith", lith_col.replace("_", " "), sampled_lith))
+    for geochem_col in preview_geochem_cols:
+        geochem_idx = feature_cols.index(geochem_col)
+        panel_specs.append(("geochem", geochem_col, geochem_X[:, geochem_idx]))
+    panel_specs.extend(
+        ("raster", name, X_raw[:, i]) for i, name in enumerate(predictor_names)
+    )
+
+    n_panels = len(panel_specs)
+    ncols = 5
+    nrows = -(-n_panels // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(18, max(3.4, nrows * 3.0)))
+    axes_flat = np.atleast_1d(axes).flatten()
+
+    for i, (kind, name, values) in enumerate(panel_specs):
+        ax = axes_flat[i]
+        plot_vector(lith_gdf, ax=ax, alpha=0.08, edgecolor="gray", linewidth=0.2)
+
+        if kind == "labels":
+            neg = y == 0
+            pos = y == 1
+            ax.scatter(
+                xs[neg], ys[neg], color="steelblue", s=10, linewidths=0, alpha=0.55
+            )
+            ax.scatter(xs[pos], ys[pos], color="red", s=16, linewidths=0, alpha=0.85)
+            ax.set_title(f"{name} ({radius_m // 1000} km)", fontsize=7, pad=2)
+        elif kind == "lith":
+            categories = pd.Index(pd.unique(values))
+            colors = plt.cm.tab20(np.linspace(0, 1, len(categories)))
+            color_lookup = {
+                category: colors[j] for j, category in enumerate(categories)
+            }
+            point_colors = [color_lookup[val] for val in values]
+            ax.scatter(xs, ys, c=point_colors, s=12, linewidths=0, alpha=0.9)
+            ax.set_title(f"lithology: {name}", fontsize=7, pad=2)
+        else:
+            cmap = (
+                "plasma"
+                if kind == "geochem"
+                else ("RdBu_r" if name.startswith("mag ") else "YlOrBr")
+            )
+            sc = ax.scatter(xs, ys, c=values, cmap=cmap, s=12, linewidths=0, alpha=0.9)
+            plt.colorbar(sc, ax=ax, shrink=0.75)
+            title = f"geochem: {name}" if kind == "geochem" else name
+            ax.set_title(title, fontsize=7, pad=2)
+
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    for j in range(n_panels, len(axes_flat)):
+        axes_flat[j].set_visible(False)
+
+    fig.suptitle(
+        "Supervised ML Inputs at Sample Points",
+        fontsize=12,
+        y=1.01,
+    )
+    fig.tight_layout()
+
+    return fig, axes
 
 
 def get_feature_importance(rf, feature_names):
     """Return a DataFrame of feature importances sorted descending."""
-    return pd.DataFrame({
-        "feature": feature_names,
-        "importance": rf.feature_importances_,
-    }).sort_values("importance", ascending=False).reset_index(drop=True)
+    return (
+        pd.DataFrame(
+            {
+                "feature": feature_names,
+                "importance": rf.feature_importances_,
+            }
+        )
+        .sort_values("importance", ascending=False)
+        .reset_index(drop=True)
+    )
 
 
-def plot_probability_map(gdf_valid, y_valid, y_prob_all, lith_gdf, tgt_gdf,
-                          radius_m, figsize=(16, 7)):
-    """Side-by-side map: training labels (left) and predicted probability (right)."""
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-
-    ax = axes[0]
+def plot_probability_map(
+    gdf_valid, y_valid, y_prob_all, lith_gdf, tgt_gdf, radius_m, figsize=(16, 7)
+):
+    """Map the model's predicted probability at each valid sample location."""
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
     plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="gray", linewidth=0.4)
-    gdf_valid[y_valid == 0].plot(ax=ax, color="steelblue", markersize=10,
-                                  alpha=0.5, label="Background")
-    gdf_valid[y_valid == 1].plot(ax=ax, color="red", markersize=20, alpha=0.8,
-                                  label=f"Positive (within {radius_m // 1000} km)")
-    tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=150,
-                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
-    ax.set_title("Training Labels")
-    ax.legend(fontsize=8)
-
-    ax = axes[1]
-    plot_vector(lith_gdf, ax=ax, alpha=0.2, edgecolor="gray", linewidth=0.4)
-    sc = ax.scatter(gdf_valid.geometry.x, gdf_valid.geometry.y,
-                    c=y_prob_all, cmap="plasma", vmin=0, vmax=1,
-                    s=30, alpha=0.85, zorder=3)
-    tgt_gdf.plot(ax=ax, marker="*", color="white", markersize=150,
-                 edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+    sc = ax.scatter(
+        gdf_valid.geometry.x,
+        gdf_valid.geometry.y,
+        c=y_prob_all,
+        cmap="plasma",
+        vmin=0,
+        vmax=1,
+        s=30,
+        alpha=0.85,
+        zorder=3,
+    )
+    tgt_gdf.plot(
+        ax=ax,
+        marker="*",
+        color="white",
+        markersize=150,
+        edgecolor="black",
+        linewidth=0.8,
+        label="Known deposits",
+        zorder=5,
+    )
     plt.colorbar(sc, ax=ax, label="Predicted probability", shrink=0.7)
     ax.set_title("Predicted Probability (all samples)")
     ax.legend(fontsize=8)
 
     plt.tight_layout()
-    return fig, axes
+    return fig, ax
 
 
-def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)):
+def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(8, 5)):
     """
     Map showing which samples landed in the train vs test set after a spatial
     checkerboard split, with faint grid lines showing the cell boundaries.
     """
     from pyproj import Transformer
 
-    train_mask  = split["train_mask"]
-    test_mask   = split["test_mask"]
-    cell_size   = split["cell_size_m"]
-    cell_km     = cell_size / 1000
-    metric_crs  = split["metric_crs"]
-    x_off       = split["x_offset_m"]
-    y_off       = split["y_offset_m"]
+    train_mask = split["train_mask"]
+    test_mask = split["test_mask"]
+    cell_size = split["cell_size_m"]
+    cell_km = cell_size / 1000
+    metric_crs = split["metric_crs"]
+    x_off = split["x_offset_m"]
+    y_off = split["y_offset_m"]
     display_crs = gdf_valid.crs
 
     fig, ax = plt.subplots(figsize=figsize)
@@ -3508,7 +4161,7 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
     # Grid line positions covering the data extent plus one cell of padding
     def grid_lines(origin, values, size):
         k0 = int(np.floor((values.min() - origin) / size)) - 1
-        k1 = int(np.ceil( (values.max() - origin) / size)) + 1
+        k1 = int(np.ceil((values.max() - origin) / size)) + 1
         return [origin + k * size for k in range(k0, k1 + 1)]
 
     x_lines = grid_lines(x_origin, xs_m, cell_size)
@@ -3531,14 +4184,34 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
         ax.plot(lons, lats, color="dimgray", linewidth=0.4, alpha=0.35, zorder=2)
 
     # ── Sample points ──────────────────────────────────────────────────────
-    gdf_valid[train_mask].plot(ax=ax, color="steelblue", markersize=12,
-                                alpha=0.7, label=f"Train  (n={train_mask.sum()})", zorder=3)
-    gdf_valid[test_mask].plot(ax=ax,  color="darkorange", markersize=12,
-                               alpha=0.7, label=f"Test   (n={test_mask.sum()})",  zorder=3)
+    gdf_valid[train_mask].plot(
+        ax=ax,
+        color="steelblue",
+        markersize=12,
+        alpha=0.7,
+        label=f"Train  (n={train_mask.sum()})",
+        zorder=3,
+    )
+    gdf_valid[test_mask].plot(
+        ax=ax,
+        color="darkorange",
+        markersize=12,
+        alpha=0.7,
+        label=f"Test   (n={test_mask.sum()})",
+        zorder=3,
+    )
 
     if tgt_gdf is not None:
-        tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=150,
-                     edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
+        tgt_gdf.plot(
+            ax=ax,
+            marker="*",
+            color="gold",
+            markersize=150,
+            edgecolor="black",
+            linewidth=0.8,
+            label="Known deposits",
+            zorder=5,
+        )
 
     # Clamp view to the actual data extent (grid lines extend beyond it)
     gx = gdf_valid.geometry.x
@@ -3548,8 +4221,10 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
     ax.set_xlim(gx.min() - margin_x, gx.max() + margin_x)
     ax.set_ylim(gy.min() - margin_y, gy.max() + margin_y)
 
-    ax.set_title(f"Spatial Checkerboard Split - {cell_km:.0f} km cells\n"
-                 f"(adjacent cells alternate train/test to reduce spatial leakage)")
+    ax.set_title(
+        f"Spatial Checkerboard Split - {cell_km:.0f} km cells\n"
+        f"(adjacent cells alternate train/test to reduce spatial leakage)"
+    )
     ax.legend(fontsize=9)
     plt.tight_layout()
     return fig, ax
