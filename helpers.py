@@ -25,6 +25,8 @@ warnings.filterwarnings('ignore', category=FutureWarning)
 
 PROJECT_ROOT = Path(os.environ.get("UCB_PROJECT_ROOT", Path(__file__).resolve().parent)).resolve()
 DATA_ROOT = Path(os.environ.get("UCB_DATA_ROOT", PROJECT_ROOT / "data")).resolve()
+VECTOR_CRS = "EPSG:4326"
+ANALYSIS_CRS = "EPSG:32638"
 
 CONTINUOUS_CMAP = 'viridis'
 DIVERGING_CMAP = 'RdYlBu_r'
@@ -87,17 +89,20 @@ def summarize_geochem(gdf, feature_cols=None, max_cols=10):
 
     # Detect feature columns if not provided
     if feature_cols is None:
-        exclude = ['geometry', 'X', 'Y', 'x', 'y', 'OBJECTID', 'FID', 'id']
+        exclude = ['geometry', 'X', 'Y', 'x', 'y', 'coord_x', 'coord_y',
+                   'OBJECTID', 'FID', 'id']
         feature_cols = [c for c in gdf.select_dtypes(include=[np.number]).columns
                         if c not in exclude]
 
     print(f"Numeric feature columns: {len(feature_cols)}")
 
     # Coordinate info
-    if 'X' in gdf.columns and 'Y' in gdf.columns:
+    if len(gdf) > 0 and hasattr(gdf, "geometry"):
+        xs = gdf.geometry.x
+        ys = gdf.geometry.y
         print(f"\nSpatial extent:")
-        print(f"  X: {gdf['X'].min():.2f} to {gdf['X'].max():.2f}")
-        print(f"  Y: {gdf['Y'].min():.2f} to {gdf['Y'].max():.2f}")
+        print(f"  X: {xs.min():.2f} to {xs.max():.2f}")
+        print(f"  Y: {ys.min():.2f} to {ys.max():.2f}")
 
     # Element groups
     majors = [c for c in feature_cols if 'percent' in c.lower() or c.endswith('_pct')]
@@ -1521,8 +1526,17 @@ def add_missing_data(df, missing_pct=0.1, columns=None, pattern='random',
         if pattern == 'random':
             missing_idx = rng.choice(df_missing.index, n_missing, replace=False)
         else:  # spatial clustering of missing values
-            # Cluster missing values in one corner
-            if 'X' in df_missing.columns and 'Y' in df_missing.columns:
+            # Cluster missing values in one corner.
+            if 'geometry' in df_missing.columns:
+                xs = df_missing.geometry.x
+                ys = df_missing.geometry.y
+                corner_mask = (xs < xs.median()) & (ys < ys.median())
+                corner_idx = df_missing[corner_mask].index
+                if len(corner_idx) >= n_missing:
+                    missing_idx = rng.choice(corner_idx, n_missing, replace=False)
+                else:
+                    missing_idx = rng.choice(df_missing.index, n_missing, replace=False)
+            elif 'X' in df_missing.columns and 'Y' in df_missing.columns:
                 corner_mask = (df_missing['X'] < df_missing['X'].median()) & \
                               (df_missing['Y'] < df_missing['Y'].median())
                 corner_idx = df_missing[corner_mask].index
@@ -1561,13 +1575,24 @@ def load_vector(path):
     return gpd.read_file(path)
 
 
-def ensure_xy(gdf):
-    """Ensure GeoDataFrame has X/Y columns based on geometry."""
-    if 'X' not in gdf.columns or 'Y' not in gdf.columns:
-        gdf = gdf.copy()
-        gdf['X'] = gdf.geometry.x
-        gdf['Y'] = gdf.geometry.y
-    return gdf
+def to_analysis_crs(gdf):
+    """Project vector data into the fixed analysis CRS."""
+    return gdf.to_crs(ANALYSIS_CRS)
+
+
+def get_point_xy(gdf):
+    """Return point coordinates as an ``(n, 2)`` numpy array."""
+    if len(gdf) == 0:
+        return np.empty((0, 2), dtype=float)
+    geom_types = set(gdf.geometry.geom_type.unique())
+    if not geom_types.issubset({'Point'}):
+        raise ValueError(f"Expected point geometries, got: {sorted(geom_types)}")
+    return np.column_stack([gdf.geometry.x.to_numpy(), gdf.geometry.y.to_numpy()])
+
+
+def get_geochem_columns(geochem_gdf):
+    """Return all non-geometry geochemistry columns."""
+    return [c for c in geochem_gdf.columns if c != "geometry"]
 
 
 def rasterize_lithology(gdf, shape, extent, value_col=None):
@@ -1638,14 +1663,25 @@ def require_one(path_candidates, label):
 
 
 def load_training_data(data_config=None):
-    """Load raster/vector inputs defined in data_config."""
+    """
+    Load the core raster and vector datasets used in the teaching notebooks.
+
+    This helper applies the project's fixed assumptions about file locations and
+    coordinate reference systems. It reads the main continuous raster, the
+    lithology polygons, and the geochemistry points, then returns them in a
+    single dictionary so notebook cells do not need to manage I/O themselves.
+
+    If no categorical raster is supplied, the lithology polygons are rasterized
+    onto the same grid as the continuous raster.
+    """
     if data_config is None:
         data_config = DEFAULT_DATA_CONFIG
     continuous_path = require_path(data_config.get('continuous_raster_path'), 'continuous_raster_path')
     continuous_raster, raster_extent, raster_crs = load_raster(continuous_path)
+    working_crs = ANALYSIS_CRS
 
     vector_path = require_path(data_config.get('vector_path'), 'vector_path')
-    vector_gdf = load_vector(vector_path)
+    vector_gdf = to_analysis_crs(load_vector(vector_path))
 
     if data_config.get('categorical_raster_path'):
         categorical_path = require_path(data_config.get('categorical_raster_path'), 'categorical_raster_path')
@@ -1654,10 +1690,11 @@ def load_training_data(data_config=None):
         categorical_raster = rasterize_lithology(vector_gdf, continuous_raster.shape, raster_extent)
 
     geochem_path = require_path(data_config.get('geochem_points_path'), 'geochem_points_path')
-    geochem_gdf = ensure_xy(load_vector(geochem_path))
+    geochem_gdf = to_analysis_crs(load_vector(geochem_path))
 
     print('\nTotal Files: 16 \n - Vector Files: 3 \n - Raster Files: 13\n')
     print('Raster shape:', continuous_raster.shape)
+    print('Working CRS:', working_crs)
     print('Vector records:', len(vector_gdf))
     print('Geochem records:', len(geochem_gdf))
     
@@ -1666,6 +1703,7 @@ def load_training_data(data_config=None):
         'continuous_raster': continuous_raster,
         'raster_extent': raster_extent,
         'raster_crs': raster_crs,
+        'working_crs': working_crs,
         'vector_gdf': vector_gdf,
         'categorical_raster': categorical_raster,
         'geochem_gdf': geochem_gdf,
@@ -1705,7 +1743,15 @@ def plot_data_format_examples(data_config=None, vector_gdf=None, geochem_gdf=Non
 
 
 def prepare_geochem_features(geochem_gdf, exclude_cols=None, value_hint='cu'):
-    """Select numeric feature columns and a default value column."""
+    """
+    Pick numeric geochemistry columns and a default example variable.
+
+    This is a convenience helper for workflows that still want an explicit list
+    of assay columns plus one representative variable for interpolation or
+    plotting. It filters out common coordinate and identifier fields, then
+    chooses a default ``value_col`` by looking for a name that contains
+    ``value_hint``.
+    """
     numeric_cols = geochem_gdf.select_dtypes(include=[np.number]).columns.tolist()
     base_exclude = {'X', 'Y', 'id', 'coord_x', 'coord_y', 'elevation_m'}
     if exclude_cols:
@@ -1785,11 +1831,30 @@ def impute_values(values, strategy='mean'):
     return imputed_values, imputer
 
 
-def prepare_pca_inputs(geochem_gdf, feature_cols, exclude_cols=None,
+def prepare_pca_inputs(geochem_gdf, feature_cols=None, exclude_cols=None,
                        transform='log1p', scale_features=True,
                        clip_quantiles_range=None):
-    """Prepare scaled geochemistry inputs for PCA."""
+    """
+    Build the numeric matrix used as input to PCA.
+
+    The function starts from the geochemistry GeoDataFrame, selects the element
+    columns to include, optionally clips extreme values, applies the chosen
+    transform, and optionally standardizes each column so all variables are on a
+    comparable scale. The returned dictionary keeps both the intermediate arrays
+    and the final matrix so the notebook can explain what PCA is operating on.
+
+    Returns
+    -------
+    dict
+        ``X_geochem`` is the raw numeric matrix after column selection,
+        ``X_log`` is the transformed version, ``X_scaled`` is the matrix passed
+        to PCA, ``pca_cols`` records the element names in column order, and
+        ``scaler`` stores the fitted ``StandardScaler`` when scaling is used.
+    """
     from sklearn.preprocessing import StandardScaler
+
+    if feature_cols is None:
+        feature_cols = get_geochem_columns(geochem_gdf)
 
     pca_exclude = {'id', 'elevation_m'}
     if exclude_cols:
@@ -1815,15 +1880,6 @@ def prepare_pca_inputs(geochem_gdf, feature_cols, exclude_cols=None,
         'pca_cols': pca_cols,
         'scaler': scaler,
     }
-
-
-def fit_pca_model(X_scaled, n_components=None, random_state=42):
-    """Fit PCA and return the model and transformed data."""
-    from sklearn.decomposition import PCA
-
-    pca = PCA(n_components=n_components, random_state=random_state)
-    X_pca = pca.fit_transform(X_scaled)
-    return pca, X_pca
 
 
 def plot_pca_variance(pca, figsize=(7, 5)):
@@ -1884,7 +1940,7 @@ def plot_pca_loadings(pca, feature_names, n_components=5, top_n_pos=5, top_n_neg
 
 def prepare_interpolation_inputs(geochem_gdf, value_col, grid_resolution=60, padding=0.05):
     """Build interpolation grid and inputs from point data."""
-    sample_coords = geochem_gdf[['X', 'Y']].values
+    sample_coords = get_point_xy(geochem_gdf)
     sample_values = geochem_gdf[value_col].values
 
     xmin, xmax = sample_coords[:, 0].min(), sample_coords[:, 0].max()
@@ -2078,85 +2134,6 @@ def run_pca_workflow(geochem_gdf, feature_cols, exclude_cols=None, show=True):
     }
 
 
-def run_kmeans_clustering(X_scaled, n_clusters=4, random_state=42):
-    """Fit K-means and return cluster labels."""
-    from sklearn.cluster import KMeans
-
-    kmeans = KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10)
-    return kmeans.fit_predict(X_scaled)
-
-
-def run_kmeans_diagnostics(X_scaled, k_range, random_state=42):
-    """Compute inertia and silhouette scores for a range of k."""
-    from sklearn.cluster import KMeans
-    from sklearn.metrics import silhouette_score
-
-    inertias = []
-    silhouettes = []
-    for k in k_range:
-        kmeans = KMeans(n_clusters=k, random_state=random_state, n_init=10)
-        labels = kmeans.fit_predict(X_scaled)
-        inertias.append(kmeans.inertia_)
-        silhouettes.append(silhouette_score(X_scaled, labels))
-    return inertias, silhouettes
-
-
-def find_elbow_k(k_range, inertias):
-    """
-    Find optimal k using the elbow method (kneedle algorithm approximation).
-
-    Uses the point of maximum curvature in the inertia curve.
-    """
-    k_range = np.array(k_range)
-    inertias = np.array(inertias)
-
-    # Normalize to [0, 1] range
-    k_norm = (k_range - k_range.min()) / (k_range.max() - k_range.min())
-    inertia_norm = (inertias - inertias.min()) / (inertias.max() - inertias.min())
-
-    # Calculate distance from each point to the line connecting first and last points
-    p1 = np.array([k_norm[0], inertia_norm[0]])
-    p2 = np.array([k_norm[-1], inertia_norm[-1]])
-
-    distances = []
-    for i in range(len(k_range)):
-        p = np.array([k_norm[i], inertia_norm[i]])
-        # Distance from point to line
-        d = np.abs(np.cross(p2 - p1, p1 - p)) / np.linalg.norm(p2 - p1)
-        distances.append(d)
-
-    # The elbow is the point with maximum distance
-    elbow_idx = np.argmax(distances)
-    return k_range[elbow_idx]
-
-
-def choose_k(k_range, inertias, user_override=None):
-    """
-    Choose optimal k for K-means, with optional user override.
-
-    Parameters
-    ----------
-    k_range : list
-        Range of k values tested.
-    inertias : list
-        Inertia values for each k.
-    user_override : int or None
-        If provided, use this value instead of elbow method.
-
-    Returns
-    -------
-    int
-        Chosen k value.
-    """
-    elbow_k = find_elbow_k(k_range, inertias)
-    print(f'Elbow method suggests k={elbow_k}')
-
-    if user_override is not None:
-        print(f'Using user override: k={user_override}')
-        return user_override
-    return elbow_k
-
-
 def plot_silhouette_scores(k_range, silhouettes, preferred_k=None, figsize=(7, 5)):
     """Plot silhouette scores across k values."""
     fig, ax = plt.subplots(figsize=figsize)
@@ -2178,7 +2155,7 @@ def plot_silhouette_scores(k_range, silhouettes, preferred_k=None, figsize=(7, 5
 def choose_lithology_column(vector_gdf, candidates=None):
     """Pick a representative lithology column if available."""
     if candidates is None:
-        candidates = ['gross_lithology', 'geology_name', 'geological_period', 'tectonic_setting']
+        candidates = ['lithology_family', 'main_lithology', 'geological_era', 'tectonic_setting']
     for col in candidates:
         if col in vector_gdf.columns:
             return col
@@ -2189,37 +2166,48 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
                                lith_column=None, figsize=(10, 8)):
     """Overlay clustered points on lithology polygons."""
     fig, ax = plt.subplots(figsize=figsize)
+    cluster_colors = ['#D55E00', '#0072B2', '#009E73', '#CC79A7',
+                      '#E69F00', '#56B4E9', '#F0E442', '#999999']
+    lith_colors = ['#e7eef5', '#efe6dc', '#e7ece3', '#f1e7f2',
+                   '#f5efdb', '#e5eef0', '#f0e4e4', '#ece8f4']
 
     if lith_column is None:
         lith_column = choose_lithology_column(vector_gdf)
 
     if lith_column:
+        n_lith = vector_gdf[lith_column].nunique(dropna=True)
+        lith_cmap = mcolors.ListedColormap(lith_colors[:n_lith])
         plot_vector(
             vector_gdf,
             column=lith_column,
             categorical=True,
-            categorical_cmap='tab20',
+            categorical_cmap=lith_cmap,
             ax=ax,
             title='Clusters on Lithology',
             alpha=0.35,
-            edgecolor='black',
-            linewidth=0.3,
+            edgecolor='#b5b5b5',
+            linewidth=0.25,
+            legend=False,
         )
     else:
-        vector_gdf.plot(ax=ax, facecolor='none', edgecolor='black', linewidth=0.4)
+        vector_gdf.plot(ax=ax, facecolor='#ececec', edgecolor='#9aa0a6',
+                        linewidth=0.35, alpha=0.45)
         ax.set_title('Clusters on Lithology')
 
     gdf_clustered = geochem_gdf.copy()
     gdf_clustered['cluster'] = cluster_labels
+    n_clusters = len(np.unique(cluster_labels))
+    cluster_cmap = mcolors.ListedColormap(cluster_colors[:n_clusters])
     gdf_clustered.plot(
         column='cluster',
         ax=ax,
         legend=True,
         categorical=True,
-        cmap='Set1',
-        markersize=45,
-        edgecolor='white',
-        linewidth=1.0,
+        cmap=cluster_cmap,
+        markersize=28,
+        edgecolor='black',
+        linewidth=0.35,
+        alpha=0.95,
     )
 
     ax.set_facecolor('#f7f7f7')
@@ -2230,7 +2218,10 @@ def plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
 def run_kmeans_overlay(vector_gdf, geochem_gdf, X_scaled, n_clusters=4,
                        lith_column=None, show=True):
     """Cluster geochemistry and plot on lithology."""
-    cluster_labels = run_kmeans_clustering(X_scaled, n_clusters=n_clusters)
+    from sklearn.cluster import KMeans
+
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    cluster_labels = kmeans.fit_predict(X_scaled)
     plot_clusters_on_lithology(vector_gdf, geochem_gdf, cluster_labels,
                                lith_column=lith_column)
     if show:
@@ -2963,7 +2954,7 @@ def map_spectral_indices(spectral_indices):
 
 def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     """
-    Create binary labels for supervised ML by buffering known deposit locations.
+    Create binary labels for supervised ML from known occurrence locations.
 
     Parameters
     ----------
@@ -2979,52 +2970,21 @@ def prepare_ml_labels(geochem_gdf, targets_gdf, radius_m=500):
     -------
     y_labels : np.ndarray, shape (n_samples,)
         Binary integer array aligned with geochem_gdf row order.
+
+    Notes
+    -----
+    The current project assumes all notebook data have already been projected
+    into the fixed analysis CRS, so distance is measured directly in metres
+    using Euclidean nearest-neighbor search.
     """
-    import geopandas as gpd
+    from scipy.spatial import cKDTree
 
-    # ---- align CRS --------------------------------------------------------
-    if geochem_gdf.crs is None or targets_gdf.crs is None:
-        raise ValueError(
-            "Both GeoDataFrames must have a CRS defined. "
-            "Set .crs on the one that is missing."
-        )
-    if geochem_gdf.crs != targets_gdf.crs:
-        targets_gdf = targets_gdf.to_crs(geochem_gdf.crs)
+    geochem_xy = np.column_stack([geochem_gdf.geometry.x, geochem_gdf.geometry.y])
+    targets_xy = np.column_stack([targets_gdf.geometry.x, targets_gdf.geometry.y])
 
-    # ---- choose distance strategy -----------------------------------------
-    crs = geochem_gdf.crs
-    is_geographic = crs.is_geographic  # True for EPSG:4326 style (degrees)
-
-    if is_geographic:
-        # Use BallTree with haversine for geographic CRS
-        from sklearn.neighbors import BallTree
-        import math
-
-        geochem_rad = np.deg2rad(
-            np.column_stack([geochem_gdf.geometry.y, geochem_gdf.geometry.x])
-        )
-        targets_rad = np.deg2rad(
-            np.column_stack([targets_gdf.geometry.y, targets_gdf.geometry.x])
-        )
-
-        tree = BallTree(targets_rad, metric='haversine')
-        # haversine returns distance in radians; convert to metres
-        EARTH_RADIUS_M = 6_371_000.0
-        threshold_rad = radius_m / EARTH_RADIUS_M
-
-        dist, _ = tree.query(geochem_rad, k=1)
-        y_labels = (dist[:, 0] <= threshold_rad).astype(int)
-
-    else:
-        # Projected CRS — straight Euclidean distance
-        from scipy.spatial import cKDTree
-
-        geochem_xy = np.column_stack([geochem_gdf.geometry.x, geochem_gdf.geometry.y])
-        targets_xy = np.column_stack([targets_gdf.geometry.x, targets_gdf.geometry.y])
-
-        tree = cKDTree(targets_xy)
-        dist, _ = tree.query(geochem_xy, k=1)
-        y_labels = (dist <= radius_m).astype(int)
+    tree = cKDTree(targets_xy)
+    dist, _ = tree.query(geochem_xy, k=1)
+    y_labels = (dist <= radius_m).astype(int)
 
     n_pos = int(y_labels.sum())
     n_neg = int(len(y_labels) - n_pos)
@@ -3040,19 +3000,23 @@ def add_lithology_features(geochem_gdf, lith_gdf, col="lithology_family"):
 
     Parameters
     ----------
-    geochem_gdf : GeoDataFrame — sample point locations
-    lith_gdf    : GeoDataFrame — lithology polygons
-    col         : str          — column in lith_gdf to encode (default: "lithology_family")
+    geochem_gdf : GeoDataFrame - sample point locations
+    lith_gdf    : GeoDataFrame - lithology polygons
+    col         : str          - column in lith_gdf to encode (default: "lithology_family")
 
     Returns
     -------
     dummies : pd.DataFrame, shape (n_samples, n_classes)
-        One-hot encoded lithology columns; rows with no polygon match are all zeros.
+        One-hot encoded lithology columns; rows with no polygon match are all
+        zeros.
+
+    Notes
+    -----
+    Each output column is a binary indicator for one lithology class. This lets
+    lithology be concatenated with raster and geochemistry predictors before
+    running a machine-learning model.
     """
     import geopandas as gpd
-
-    if lith_gdf.crs != geochem_gdf.crs:
-        lith_gdf = lith_gdf.to_crs(geochem_gdf.crs)
 
     joined = gpd.sjoin(
         geochem_gdf[["geometry"]],
@@ -3072,7 +3036,7 @@ def add_lithology_features(geochem_gdf, lith_gdf, col="lithology_family"):
 
 def extract_raster_values(geochem_gdf, *raster_dirs):
     """
-    Sample raster layers at geochem sample locations.
+    Sample raster values at every geochemistry point.
 
     Parameters
     ----------
@@ -3090,9 +3054,14 @@ def extract_raster_values(geochem_gdf, *raster_dirs):
         on a nodata cell.
     predictor_names : list[str]
         One name per column of ``X_raw``.
+
+    Notes
+    -----
+    This helper is the bridge between map-based raster layers and
+    sample-by-sample machine-learning tables. Each raster becomes one predictor
+    column, and each geochemistry point becomes one row.
     """
     import rasterio
-    from pyproj import Transformer
     from pathlib import Path
 
     layers = {}
@@ -3104,14 +3073,8 @@ def extract_raster_values(geochem_gdf, *raster_dirs):
             raise FileNotFoundError(f"No .tif files found in {raster_dir}")
         for path in tif_paths:
             with rasterio.open(path) as src:
-                if src.crs and geochem_gdf.crs and src.crs != geochem_gdf.crs:
-                    t = Transformer.from_crs(geochem_gdf.crs, src.crs, always_xy=True)
-                    xs, ys = t.transform(
-                        geochem_gdf.geometry.x.values, geochem_gdf.geometry.y.values
-                    )
-                else:
-                    xs = geochem_gdf.geometry.x.values
-                    ys = geochem_gdf.geometry.y.values
+                xs = geochem_gdf.geometry.x.values
+                ys = geochem_gdf.geometry.y.values
                 coords = list(zip(xs, ys))
                 vals = np.array([v[0] for v in src.sample(coords)], dtype=float)
                 if src.nodata is not None:
@@ -3126,7 +3089,7 @@ def extract_raster_values(geochem_gdf, *raster_dirs):
 
 def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
     """
-    Split point data into train/test using a checkerboard over projected space.
+    Split point data into train/test using a checkerboard in map space.
 
     Parameters
     ----------
@@ -3145,21 +3108,19 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
     -------
     split : dict
         Train/test masks plus checkerboard metadata.
-    """
-    import geopandas as gpd
 
-    if gdf.crs is None:
-        raise ValueError("GeoDataFrame must have a CRS before applying a spatial split.")
+    Notes
+    -----
+    Nearby samples tend to be similar, so a random split can make model
+    performance look better than it really is. This helper uses alternating map
+    cells to keep neighboring samples together and produce a stricter spatial
+    evaluation.
+    """
     if cell_size_m <= 0:
         raise ValueError("cell_size_m must be positive.")
 
-    metric_crs = gdf.crs
-    if gdf.crs.is_geographic:
-        metric_crs = gdf.estimate_utm_crs()
-        if metric_crs is None:
-            raise ValueError("Could not estimate a projected CRS for checkerboard split.")
-
-    metric_gdf = gdf.to_crs(metric_crs)
+    metric_crs = ANALYSIS_CRS
+    metric_gdf = gdf
     xs = metric_gdf.geometry.x.to_numpy()
     ys = metric_gdf.geometry.y.to_numpy()
     x_min = xs.min()
@@ -3244,27 +3205,92 @@ def spatial_checkerboard_split(gdf, y=None, cell_size_m=5000, random_state=42):
 # Visualization helpers (wrapping boilerplate for notebook clarity)
 # =============================================================================
 
-def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8)):
-    """Map of geochem sample locations, lithology background, and known deposits."""
+def plot_data_overview(geochem_gdf, lith_gdf, tgt_gdf, figsize=(10, 8),
+                       geochem_color_col=None, geochem_cmap="viridis"):
+    """
+    Plot the main study-area overview map used early in the notebook.
+
+    The map combines lithology polygons, geochemistry sample locations, and
+    known mineral occurrences in one figure so students can orient themselves
+    before moving into PCA, clustering, or supervised learning. When
+    ``geochem_color_col`` is provided, the sample points are colored by that
+    numeric column and a colorbar is added automatically.
+    """
+    from matplotlib.lines import Line2D
+
     fig, ax = plt.subplots(figsize=figsize)
-    plot_vector(lith_gdf, ax=ax, title="Sample Locations and Known Deposits",
-                alpha=0.3, edgecolor="grey", linewidth=0.4)
-    geochem_gdf.plot(ax=ax, color="steelblue", markersize=15, alpha=0.7,
-                     label="Geochem samples")
+    lith_units = pd.Index(lith_gdf["lithology_family"].dropna().unique())
+    if len(lith_units) <= len(CATEGORICAL_COLORS):
+        unit_colors = CATEGORICAL_COLORS[:len(lith_units)]
+    else:
+        unit_colors = [mcolors.to_hex(plt.get_cmap("tab20", len(lith_units))(i))
+                       for i in range(len(lith_units))]
+    lith_cmap = mcolors.ListedColormap(unit_colors)
+
+    plot_vector(lith_gdf, column="lithology_family", categorical=True, ax=ax,
+                title="Sample Locations and Known Deposits",
+                alpha=0.3, edgecolor="grey", linewidth=0.4,
+                legend=False, categorical_cmap=lith_cmap)
+
+    if geochem_color_col is None:
+        geochem_gdf.plot(ax=ax, color="steelblue", markersize=15, alpha=0.7,
+                         label="Geochem samples")
+    else:
+        if geochem_color_col not in geochem_gdf.columns:
+            raise ValueError(f"Column not found in geochem data: {geochem_color_col}")
+        values = geochem_gdf[geochem_color_col]
+        sc = ax.scatter(
+            geochem_gdf.geometry.x,
+            geochem_gdf.geometry.y,
+            c=values,
+            cmap=geochem_cmap,
+            s=18,
+            alpha=0.85,
+            edgecolors="white",
+            linewidths=0.25,
+            zorder=4,
+        )
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes("right", size="3%", pad=0.1)
+        cbar = plt.colorbar(sc, cax=cax)
+        cbar.set_label(geochem_color_col)
+
     tgt_gdf.plot(ax=ax, marker="*", color="gold", markersize=180,
                  edgecolor="black", linewidth=0.8, label="Known deposits", zorder=5)
-    ax.legend()
+
+    sample_handles = [
+        Line2D([0], [0], marker="o", color="none", markerfacecolor="steelblue",
+               markeredgecolor="white", markersize=7, label="Geochem samples"),
+        Line2D([0], [0], marker="*", color="none", markerfacecolor="gold",
+               markeredgecolor="black", markersize=14, label="Known deposits"),
+    ]
+    sample_legend = ax.legend(handles=sample_handles, loc="upper right", title="Legend")
+    ax.add_artist(sample_legend)
+
+    lith_handles = [
+        Patch(facecolor=color, edgecolor="grey", label=unit)
+        for unit, color in zip(lith_units, unit_colors)
+    ]
+    ax.legend(handles=lith_handles, loc="lower left", title="Lithology units",
+              fontsize=8, title_fontsize=9)
     plt.tight_layout()
     return fig, ax
 
 
 def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
-                           y, radius_m, tgt_gdf, geochem_X, feature_cols,
+                           y, radius_m, tgt_gdf, geochem_X, feature_cols=None,
                            preview_elements=("Cu_ppm_icp", "Mo_ppm_icp", "Au_ppb_icp")):
     """
-    Two figures:
-      1. Grid of all raster inputs + lithology panel + training labels panel.
-      2. Three geochem pathfinder scatter plots.
+    Summarize the predictor stack used in the supervised-learning section.
+
+    Two figures are created:
+    1. A grid of raster predictor layers plus lithology and training-label
+       panels.
+    2. A small set of geochemistry pathfinder maps colored by transformed assay
+       values.
+
+    This gives students a quick visual check of what information the model is
+    learning from before the train/test split and random forest steps.
     """
     import rasterio
     from pathlib import Path
@@ -3315,13 +3341,15 @@ def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
         axes_flat[j].set_visible(False)
 
     plt.suptitle(
-        f"Input Features — {len(all_raster_paths)} rasters + lithology + "
+        f"Input Features - {len(all_raster_paths)} rasters + lithology + "
         f"{len(feature_cols)} geochem elements (log-transformed)",
         fontsize=11, y=1.01,
     )
     plt.tight_layout()
 
     # ── Figure 2: geochem pathfinder scatter ───────────────────────────────
+    if feature_cols is None:
+        feature_cols = get_geochem_columns(geochem_gdf)
     feature_cols = list(feature_cols)
     valid_elems = [e for e in preview_elements if e in feature_cols]
     fig2, axes2 = plt.subplots(1, len(valid_elems), figsize=(5 * len(valid_elems), 4))
@@ -3338,7 +3366,7 @@ def plot_feature_overview(geochem_gdf, spectral_dir, geophys_dir, lith_gdf,
         ax.set_title(f"{parts[0]} ({parts[1]})", fontsize=10)
         ax.set_xticks([]); ax.set_yticks([])
 
-    plt.suptitle(f"Geochem Pathfinders (log-transformed) — {len(valid_elems)} of {len(feature_cols)} input features",
+    plt.suptitle(f"Geochem Pathfinders (log-transformed) - {len(valid_elems)} of {len(feature_cols)} input features",
                  fontsize=11, y=1.02)
     plt.tight_layout()
 
@@ -3456,7 +3484,7 @@ def plot_spatial_split(gdf_valid, split, lith_gdf, tgt_gdf=None, figsize=(10, 8)
     ax.set_xlim(gx.min() - margin_x, gx.max() + margin_x)
     ax.set_ylim(gy.min() - margin_y, gy.max() + margin_y)
 
-    ax.set_title(f"Spatial Checkerboard Split — {cell_km:.0f} km cells\n"
+    ax.set_title(f"Spatial Checkerboard Split - {cell_km:.0f} km cells\n"
                  f"(adjacent cells alternate train/test to reduce spatial leakage)")
     ax.legend(fontsize=9)
     plt.tight_layout()
